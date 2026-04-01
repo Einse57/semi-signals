@@ -1,8 +1,8 @@
 # semi-signals
 
-Real-time skeleton-based seizure motion analysis — live body + hand tracking with per-region L/R motion quantification, accelerated via OpenVINO on Intel iGPU.
+Real-time skeleton-based motion analysis — live body + hand tracking with per-region L/R motion quantification, accelerated via OpenVINO on Intel iGPU.
 
-Inspired by [VSViG (Xu et al., ECCV 2024)](https://arxiv.org/abs/2311.14775) but extends beyond its input pipeline with 21-keypoint hand tracking and finger-level motion. See [JOINT_MAPPING.md](src/JOINT_MAPPING.md) for a detailed comparison.
+Inspired by [VSViG (Xu et al., ECCV 2024)](https://arxiv.org/abs/2311.14775) but extends its input pipeline with 21-keypoint hand tracking and finger-level motion. See [JOINT_MAPPING.md](src/JOINT_MAPPING.md) for a detailed comparison.
 
 ## Quick Start
 
@@ -75,6 +75,6 @@ semi-signals/
 
 **What this project can do today:**
 - Rule-based alerts on motion thresholds (e.g., sustained bilateral tremor)
-- L/R asymmetry detection as a seizure indicator
+- L/R asymmetry detection as an indicator
 - Motion time-series recording for offline analysis
-- Clip export on motion spikes for clinical review
+- Clip export on motion spikes for review
