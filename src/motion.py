@@ -193,6 +193,10 @@ class MotionQuantifier:
 
         return result
 
+    def reset_hands(self) -> None:
+        """Clear hand tracking state without losing graph history."""
+        self._prev_hand_kpts = {"left": None, "right": None}
+
     def reset(self) -> None:
         self._prev_keypoints = None
         self._velocities = None

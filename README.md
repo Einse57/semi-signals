@@ -46,7 +46,7 @@ Tested on Intel Core Ultra 7 165U (Meteor Lake) — Xe-LPG iGPU, AI Boost NPU 37
 | iGPU (OpenVINO) — body only | ~40 |
 | iGPU (OpenVINO) — body + hands | ~25–30 |
 
-OpenVINO targets the iGPU via a monkey-patch in `config.py` (rtmlib's built-in OpenVINO backend hardcodes CPU). The NPU compiles all models but is slower — YOLOX ~9× slower, RTMPose ~1.2× slower — as it's optimised for INT8/always-on workloads, not FP32 real-time vision.
+OpenVINO targets the iGPU via a monkey-patch in `config.py` (rtmlib's built-in OpenVINO backend hardcodes CPU). The NPU compiles all models but is slower — YOLOX ~9× slower, RTMPose ~1.2× slower.
 
 ## Project Layout
 

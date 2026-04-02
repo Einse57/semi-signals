@@ -176,7 +176,7 @@ def main() -> None:
                 dummy_scores = np.zeros(17, dtype=np.float32)
                 hand_est.estimate(np.zeros((64,64,3), dtype=np.uint8),
                                   dummy_kpts, dummy_scores)
-            motion_q.reset()
+            motion_q.reset_hands()
             print(f"[INFO] Hand tracking: {'ON' if hands_enabled else 'OFF'}")
         if key == ord("c") and not is_video_file:
             # Cycle to next available camera
