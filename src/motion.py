@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import deque
 import math
+import time
 
 import numpy as np
 
@@ -51,6 +52,9 @@ class MotionQuantifier:
             region: deque(maxlen=history_len) for region in BODY_REGIONS
         }
 
+        # Wall-clock timestamps aligned with history entries
+        self.timestamps: deque[float] = deque(maxlen=history_len)
+
         # Legacy alias kept for back-compat
         self.total_intensity_history = self.region_intensity_history["overall"]
 
@@ -84,6 +88,9 @@ class MotionQuantifier:
             self._velocities = np.zeros(keypoints.shape[0], dtype=np.float32)
 
         self._prev_keypoints = keypoints.copy()
+
+        # Record wall-clock time for this sample
+        self.timestamps.append(time.monotonic())
 
         # Per-joint history
         for i, name in enumerate(KEYPOINT_NAMES):
@@ -189,6 +196,7 @@ class MotionQuantifier:
     def reset(self) -> None:
         self._prev_keypoints = None
         self._velocities = None
+        self.timestamps.clear()
         for d in self.joint_velocity_history.values():
             d.clear()
         for d in self.region_intensity_history.values():

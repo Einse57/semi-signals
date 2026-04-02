@@ -10,6 +10,7 @@ import numpy as np
 from src.config import (
     BODY_REGIONS,
     CHART_GROUPS,
+    CHART_TIME_WINDOW,
     DISPLAY_HEIGHT,
     DISPLAY_WIDTH,
     HAND_SKELETON_EDGES,
@@ -23,8 +24,6 @@ from src.config import (
 _JOINT_COLORS: dict[int, tuple[int, int, int]] = {}
 for _j in BODY_REGIONS.get("head", []):
     _JOINT_COLORS[_j] = REGION_COLORS.get("head", (0, 255, 255))
-for _j in BODY_REGIONS.get("torso", []):
-    _JOINT_COLORS[_j] = REGION_COLORS.get("torso", (200, 200, 200))
 for _j in (*BODY_REGIONS.get("l_arm", []), *BODY_REGIONS.get("r_arm", [])):
     _JOINT_COLORS[_j] = (0, 200, 0)
 for _j in (*BODY_REGIONS.get("l_hand", []), *BODY_REGIONS.get("r_hand", [])):
@@ -127,8 +126,14 @@ def _draw_single_chart(
     region_histories: dict[str, list[float] | object],
     chart_w: int,
     chart_h: int,
+    timestamps: list[float] | None = None,
 ) -> np.ndarray:
     """Render one mini-chart with overlaid region lines.
+
+    When *timestamps* is provided, the x-axis represents a fixed
+    ``CHART_TIME_WINDOW``-second window ending at the latest timestamp.
+    Points are positioned by wall-clock time so the scroll rate is
+    constant regardless of FPS.
 
     Returns a BGR image of size (chart_h, chart_w, 3).
     """
@@ -140,6 +145,14 @@ def _draw_single_chart(
     plot_h = chart_h - title_h - 2
     plot_y0 = title_h
 
+    # Determine time window
+    use_time_axis = timestamps is not None and len(timestamps) >= 2
+    if use_time_axis:
+        t_now = timestamps[-1]
+        t_start = t_now - CHART_TIME_WINDOW
+    else:
+        t_now = t_start = 0.0
+
     # Auto-scale: per-chart max (ignoring NaN)
     local_max = 1.0
     for key in region_keys:
@@ -148,20 +161,42 @@ def _draw_single_chart(
         if finite:
             local_max = max(local_max, max(finite))
 
+    # Draw minute markers when using time axis
+    if use_time_axis:
+        for mins in range(1, int(CHART_TIME_WINDOW // 60) + 1):
+            t_mark = t_now - mins * 60
+            if t_mark < t_start:
+                break
+            frac = (t_mark - t_start) / CHART_TIME_WINDOW
+            px = int(frac * plot_w)
+            cv2.line(canvas, (px, plot_y0), (px, plot_y0 + plot_h),
+                     (40, 40, 40), 1)
+            cv2.putText(canvas, f"-{mins}m", (px + 2, plot_y0 + 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.25, (80, 80, 80), 1)
+
     for key in region_keys:
         data = list(region_histories.get(key, []))
         if len(data) < 2:
             continue
         color = REGION_COLORS.get(key, (200, 200, 200))
-        n_pts = len(data)
-        x_step = plot_w / max(n_pts - 1, 1)
 
         prev_pt = None
         for i, v in enumerate(data):
             if math.isnan(v):
                 prev_pt = None
                 continue
-            px = int(i * x_step)
+
+            if use_time_axis:
+                t = timestamps[i]
+                if t < t_start:
+                    prev_pt = None
+                    continue
+                frac = (t - t_start) / CHART_TIME_WINDOW
+                px = int(frac * plot_w)
+            else:
+                n_pts = len(data)
+                px = int(i * plot_w / max(n_pts - 1, 1))
+
             py = plot_y0 + plot_h - 1 - int((v / local_max) * (plot_h - 2))
             py = max(plot_y0, min(plot_y0 + plot_h - 1, py))
             cur_pt = (px, py)
@@ -195,14 +230,16 @@ def draw_region_chart(
     region_histories: dict[str, list[float] | object],
     chart_w: int = DISPLAY_WIDTH,
     chart_h: int = 250,
+    timestamps: list[float] | object | None = None,
 ) -> np.ndarray:
-    """Render 5 stacked mini-charts based on CHART_GROUPS config.
+    """Render 4 stacked mini-charts based on CHART_GROUPS config.
 
     Each chart group gets an equal share of the total height, with
     its own auto-scale and legend.
 
     Returns a BGR image of size (chart_h, chart_w, 3).
     """
+    ts = list(timestamps) if timestamps is not None else None
     n_groups = len(CHART_GROUPS)
     per_h = chart_h // n_groups
     strips: list[np.ndarray] = []
@@ -210,7 +247,7 @@ def draw_region_chart(
     for title, region_keys in CHART_GROUPS:
         strip = _draw_single_chart(
             title, region_keys, region_histories,
-            chart_w, per_h,
+            chart_w, per_h, timestamps=ts,
         )
         strips.append(strip)
 

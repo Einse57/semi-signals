@@ -197,8 +197,7 @@ HAND_SKELETON_EDGES = [
 # A region is "visible" when at least one constituent joint passes
 # the keypoint confidence threshold.
 BODY_REGIONS: dict[str, list[int]] = {
-    "head":    [0, 1, 2, 3, 4],        # nose, eyes, ears
-    "torso":   [5, 6, 11, 12],         # shoulders, hips
+    "head":    [0, 1, 2],              # nose, eyes (VSViG drops ears)
     "l_arm":   [5, 7],                 # l_shoulder, l_elbow
     "r_arm":   [6, 8],                 # r_shoulder, r_elbow
     "l_hand":  [9],                    # l_wrist (overridden by hand model)
@@ -211,7 +210,6 @@ BODY_REGIONS: dict[str, list[int]] = {
 # Display colours (BGR) for each region line
 REGION_COLORS: dict[str, tuple[int, int, int]] = {
     "head":    (0, 255, 255),    # cyan
-    "torso":   (200, 200, 200),  # grey
     "l_arm":   (0, 200, 0),      # green
     "r_arm":   (200, 0, 0),      # blue
     "l_hand":  (0, 255, 128),    # light green
@@ -227,11 +225,11 @@ CHART_GROUPS: list[tuple[str, list[str]]] = [
     ("Hands",  ["l_hand", "r_hand"]),
     ("Arms",   ["l_arm", "r_arm"]),
     ("Head",   ["head"]),
-    ("Torso",  ["torso"]),
     ("Legs",   ["l_leg", "r_leg"]),
 ]
 
 # ── Display ───────────────────────────────────────────────────
 DISPLAY_WIDTH = 960
 DISPLAY_HEIGHT = 540
-MOTION_HISTORY_LEN = 300      # data-points to keep in scrolling chart
+CHART_TIME_WINDOW = 60.0      # seconds of history shown on charts (1 min)
+MOTION_HISTORY_LEN = 2_400    # data-points to keep (~1 min at 40 FPS)

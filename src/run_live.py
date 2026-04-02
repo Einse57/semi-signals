@@ -159,7 +159,8 @@ def main() -> None:
 
         # 5. Compose and show
         chart_img = draw_region_chart(motion_q.region_intensity_history,
-                                       chart_h=350)
+                                       chart_h=350,
+                                       timestamps=motion_q.timestamps)
         display = compose_display(frame, chart_img)
         cv2.imshow("Semi-Signals | Stage 1", display)
 
