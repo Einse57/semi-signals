@@ -25,6 +25,9 @@ def load_records(kp_dir, xlsx, cache=None, exclude=("pat04_no-Sz2P",)):
             continue
         pat, stem = name.split("_", 1)
         k = video_key(stem)
+        if k and (pat, k) not in lab:
+            print(f"SKIP {name}: no row in Label.xlsx (unlabelled seizure video)", flush=True)
+            continue
         eeg, clin = lab[(pat, k)] if k else (None, None)
         cf = os.path.join(cache, name + ".feat.npz") if cache else None
         if cf and os.path.exists(cf):
