@@ -74,6 +74,14 @@ def train_items(recs):
     return it
 
 
+def gather(recs, batch, dev):
+    """batch: list of (rec, end). Returns patches (B,30,15,3,32,32) float on dev, kpts (B,30,15,3)."""
+    P = np.stack([np.asarray(_patches(r["P"])[e - WIN:e]) for r, e in batch])          # uint8 (B,30,15,32,32,3)
+    K = np.stack([r["kp"][e - WIN:e] for r, e in batch])
+    p = torch.from_numpy(P).to(dev, non_blocking=True).permute(0, 1, 2, 5, 3, 4).float().contiguous()
+    return p, torch.from_numpy(K).to(dev, non_blocking=True)
+
+
 def make_model():
     from third_party.vsvig.VSViG import VSViG_base
     return VSViG_base()
@@ -86,15 +94,25 @@ def fit(recs, dev, log, workers=2):
     m = make_model().to(dev)
     opt = torch.optim.AdamW(m.parameters(), lr=LR, weight_decay=WD)
     g = torch.Generator(); g.manual_seed(0)
-    dl = torch.utils.data.DataLoader(DS(items), batch_size=BS, shuffle=True, num_workers=workers, generator=g,
-                                     drop_last=True, persistent_workers=workers > 0)
-    steps = EPOCHS * len(dl); sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, steps)
+    if workers > 0:
+        dl = torch.utils.data.DataLoader(DS(items), batch_size=BS, shuffle=True, num_workers=workers, generator=g,
+                                         drop_last=True, persistent_workers=True)
+        nb = len(dl)
+    else:
+        rng = np.random.default_rng(0); nb = len(items) // BS
+        def batches():
+            order = rng.permutation(len(items))
+            for b in range(nb):
+                sel = [items[i] for i in order[b * BS:(b + 1) * BS]]
+                p, k = gather(None, [(r, e) for r, e, _ in sel], dev)
+                yield p, k, torch.tensor([float(l) for _, _, l in sel])
+    steps = EPOCHS * nb; sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, steps)
     scaler = torch.amp.GradScaler("cuda")
     pw = torch.tensor(nneg / max(1, npos), device=dev)
     t0 = time.time()
     for ep in range(EPOCHS):
         m.train(); tot = 0.0
-        for p, k, y in dl:
+        for p, k, y in (dl if workers > 0 else batches()):
             p, k, y = p.to(dev, non_blocking=True), k.to(dev, non_blocking=True), y.to(dev)
             with torch.autocast("cuda", dtype=torch.float16):
                 out = m(p, k).reshape(-1).float()
@@ -102,7 +120,7 @@ def fit(recs, dev, log, workers=2):
             loss = -(pw * y * torch.log(out) + (1 - y) * torch.log(1 - out)).mean()
             opt.zero_grad(set_to_none=True); scaler.scale(loss).backward(); scaler.step(opt); scaler.update(); sched.step()
             tot += loss.item()
-        log(f"  epoch {ep + 1}/{EPOCHS} loss {tot / len(dl):.4f} ({len(items)} windows, pos {npos}) {time.time() - t0:.0f}s")
+        log(f"  epoch {ep + 1}/{EPOCHS} loss {tot / nb:.4f} ({len(items)} windows, pos {npos}) {time.time() - t0:.0f}s")
     return m
 
 
@@ -111,9 +129,9 @@ def predict(m, r, dev):
     m.eval(); n = len(r["y"]); prob = np.zeros(n, np.float32)
     ss = [s for s in range(n) if r["ends"][s] >= WIN]
     for i in range(0, len(ss), 64):
-        b = ss[i:i + 64]; P, K = zip(*[window(r, int(r["ends"][s])) for s in b])
+        b = ss[i:i + 64]; p, k = gather(None, [(r, int(r["ends"][s])) for s in b], dev)
         with torch.autocast("cuda", dtype=torch.float16):
-            o = m(torch.from_numpy(np.stack(P)).to(dev), torch.from_numpy(np.stack(K)).to(dev)).reshape(-1).float()
+            o = m(p, k).reshape(-1).float()
         prob[b] = o.cpu().numpy()
     return prob
 
