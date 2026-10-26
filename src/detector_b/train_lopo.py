@@ -142,6 +142,8 @@ if __name__ == "__main__":
     ap.add_argument("--labels", required=True); ap.add_argument("--out", required=True)
     ap.add_argument("--stage", choices=["outer", "inner"], default="outer")
     ap.add_argument("--workers", type=int, default=2)
+    ap.add_argument("--reverse", action="store_true",
+                    help="inner stage: walk folds from the end (second process sharing the work; no effect on results)")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     logf = open(os.path.join(a.out, f"{a.stage}.log"), "a")
@@ -151,7 +153,14 @@ if __name__ == "__main__":
     recs = load(a.slim, a.patches, a.labels)
     pats = sorted({r["pat"] for r in recs})
     log(f"{len(recs)} records, {len(pats)} patients, stage {a.stage}")
-    for p in pats:
+    def busy(f):
+        # fold currently being trained by another process (last 'inner fold' line in the shared log)
+        try:
+            lines = [l for l in open(os.path.join(a.out, "inner.log")) if "inner fold" in l]
+        except OSError:
+            return False
+        return bool(lines) and lines[-1].split("inner fold ", 1)[1].split(" [")[0] == f
+    for p in (pats[::-1] if a.reverse else pats):
         train = [r for r in recs if r["pat"] != p]
         if a.stage == "outer":
             f = os.path.join(a.out, f"outer_{p}.npz")
@@ -162,9 +171,11 @@ if __name__ == "__main__":
             torch.save(m.state_dict(), os.path.join(a.out, f"outer_{p}.pth"))
         else:
             tp = sorted({r["pat"] for r in train}); groups = [tp[i::3] for i in range(3)]
-            for gi, g in enumerate(groups):
+            order = list(enumerate(groups))
+            for gi, g in (order[::-1] if a.reverse else order):
                 f = os.path.join(a.out, f"inner_{p}_{gi}.npz")
                 if os.path.exists(f): continue
+                if a.reverse and busy(f"{p} group {gi}"): continue
                 log(f"inner fold {p} group {gi} {g}")
                 m = fit([r for r in train if r["pat"] not in g], dev, log, a.workers)
                 np.savez(f, **{r["name"]: predict(m, r, dev) for r in train if r["pat"] in g})
