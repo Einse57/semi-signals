@@ -1,6 +1,6 @@
 # Detector A + Detector B (video-only) noisy-OR fusion: preregistration addendum
 
-Written 2026-10-25 23:50 PDT. At this time no Detector B (VSViG LOPO) held-out or inner-fold
+Written 2026-10-25 23:43 PDT. At this time no Detector B (VSViG LOPO) held-out or inner-fold
 probability has been produced or looked at (the first outer fold is still training).
 Addendum to `docs/vsvig_lopo_preregistration.md`; everything not listed here follows that document.
 
