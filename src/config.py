@@ -1,14 +1,20 @@
 """Shared configuration constants."""
 
 from pathlib import Path
-import torch
+try:  # torch is optional (only needed for torch-based models)
+    import torch
+except ImportError:  # pragma: no cover
+    torch = None
 
 # ── Project root ──────────────────────────────────────────────
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-# ── Device selection (XPU > CUDA > CPU) ───────────────────────
-def get_device() -> torch.device:
-    if torch.xpu.is_available():
+
+def get_device():
+    """Device selection (XPU > CUDA > CPU)."""
+    if torch is None:
+        return "cpu"
+    if hasattr(torch, "xpu") and torch.xpu.is_available():
         return torch.device("xpu")
     if torch.cuda.is_available():
         return torch.device("cuda")

@@ -1,6 +1,6 @@
 # Detector A: pose-feature seizure detector, preregistered protocol
 
-Written 2026-10-25 (Sun) 21:05 PT, **before** any features were computed or any model trained/scored.
+Written 2026-10-25 (Sun) 20:53 PT, **before** any features were computed or any model trained/scored.
 Changes after this point are listed under "Deviations" with a reason and a timestamp.
 
 ## Data

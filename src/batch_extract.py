@@ -189,22 +189,44 @@ def process_video(path: Path, out_path: Path, det, pose, hand, fps: float, patch
     return meta
 
 
+def _limit_ort_threads(n: int) -> None:
+    """Cap ONNX Runtime CPU threads (rtmlib creates sessions without options)."""
+    import onnxruntime as ort
+    _orig = ort.InferenceSession
+
+    class _Session(_orig):
+        def __init__(self, path_or_bytes, sess_options=None, *args, **kw):
+            if sess_options is None:
+                sess_options = ort.SessionOptions()
+            sess_options.intra_op_num_threads = n
+            sess_options.inter_op_num_threads = 1
+            super().__init__(path_or_bytes, sess_options, *args, **kw)
+
+    ort.InferenceSession = _Session
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("videos", nargs="+")
     ap.add_argument("--out", required=True)
     ap.add_argument("--fps", type=float, default=6.0)
-    ap.add_argument("--device", default="cuda", help="cuda | cpu | gpu (OpenVINO iGPU)")
+    ap.add_argument("--device", default="cuda", help="cuda | dml | cpu | gpu (OpenVINO iGPU)")
     ap.add_argument("--backend", default=None, help="onnxruntime | openvino (default by device)")
     ap.add_argument("--patches", action="store_true")
     ap.add_argument("--no-hands", action="store_true")
     ap.add_argument("--threads", type=int, default=2, help="OpenCV threads")
+    ap.add_argument("--ort-threads", type=int, default=0, help="ONNX Runtime intra-op threads (0 = default)")
     ap.add_argument("--det-thr", type=float, default=0.3, help="person detector score threshold")
     a = ap.parse_args(argv)
 
     import cv2
     cv2.setNumThreads(a.threads)
+    if a.ort_threads > 0:
+        _limit_ort_threads(a.ort_threads)
     backend = a.backend or ("openvino" if a.device == "gpu" else "onnxruntime")
+    if a.device == "dml":  # DirectML (any DX12 GPU on Windows, pip install onnxruntime-directml)
+        from rtmlib.tools import base as _rb
+        _rb.RTMLIB_SETTINGS["onnxruntime"]["dml"] = "DmlExecutionProvider"
     from src.detector import PersonDetector
     from src.pose_estimator import PoseEstimator
     from src.hand_estimator import HandEstimator
