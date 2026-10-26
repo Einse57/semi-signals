@@ -27,21 +27,37 @@ def load(slim_dir, patch_dir, xlsx):
         ends = np.searchsorted(t, np.arange(n) + 1.0)          # samples with t < s+1
         kp = np.concatenate([np.nan_to_num(d["K"]), d["S"].astype(np.float32)[..., None]], -1).astype(np.float32)
         kp[d["sel"] < 0] = 0
-        P = np.load(os.path.join(patch_dir, name + ".patches.npy"), mmap_mode="r")
-        recs.append(dict(name=name, pat=pat, y=y, ends=ends, kp=kp, P=P, eeg=eeg, clin=clin))
+        recs.append(dict(name=name, pat=pat, y=y, ends=ends, kp=kp, P=os.path.join(patch_dir, name + ".patches.npy"),
+                         eeg=eeg, clin=clin))
     return recs
 
 
+_MM = {}
+
+
+def _patches(path):
+    # opened lazily per process (memmaps must not be pickled to DataLoader workers on Windows)
+    if path not in _MM:
+        _MM[path] = np.load(path, mmap_mode="r")
+    return _MM[path]
+
+
 def window(r, e):
-    p = np.asarray(r["P"][e - WIN:e], np.float32).transpose(0, 1, 4, 2, 3)   # (30,15,3,32,32)
+    p = np.asarray(_patches(r["P"])[e - WIN:e], np.float32).transpose(0, 1, 4, 2, 3)   # (30,15,3,32,32)
     return p, r["kp"][e - WIN:e]
 
 
 class DS(torch.utils.data.Dataset):
-    def __init__(self, items): self.items = items
+    """items: (rec_index, end, label); recs reduced to path + keypoints so workers pickle cheaply."""
+    def __init__(self, items):
+        recs = []; idx = {}
+        for r, e, lab in items:
+            if id(r) not in idx:
+                idx[id(r)] = len(recs); recs.append(dict(P=r["P"], kp=r["kp"]))
+        self.recs = recs; self.items = [(idx[id(r)], e, lab) for r, e, lab in items]
     def __len__(self): return len(self.items)
     def __getitem__(self, i):
-        r, e, lab = self.items[i]; p, k = window(r, e)
+        ri, e, lab = self.items[i]; p, k = window(self.recs[ri], e)
         return torch.from_numpy(np.ascontiguousarray(p)), torch.from_numpy(np.ascontiguousarray(k)), torch.tensor(float(lab))
 
 
