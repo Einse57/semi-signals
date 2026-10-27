@@ -19,7 +19,7 @@ MOTION_GROUPS = [("Hands", ["l_hand", "r_hand"]), ("Arms", ["l_arm", "r_arm"]), 
                  ("Legs", ["l_leg", "r_leg"]), ("Whole body", ["overall"])]
 SHORT = {"l_hand": "L hand", "r_hand": "R hand", "l_arm": "L arm", "r_arm": "R arm", "head": "head",
          "l_leg": "L leg", "r_leg": "R leg", "overall": "all"}
-DISCLAIMER = "Drivers explain the model score, not clinical cause. Research demo, not diagnostic."
+DISCLAIMER = "Drivers explain the model score, not clinical cause. Research use only, not diagnostic."
 
 
 class Axis:

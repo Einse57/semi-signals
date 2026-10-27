@@ -88,10 +88,22 @@ live viewer and an annotation tool:
   On a second site (MCEC_Seizure, 4 patients, skeletons only) a frozen body-only model caught 2/5 at 11.3/h,
   with chance-level per-second ranking: [docs/mcec_crosssite_results.md](docs/mcec_crosssite_results.md).
 
+### Quick start: double-click start.cmd (or run .\start.ps1)
+On Windows, double-click `start.cmd` in the repo folder. It sets up `.venv` on first use (it asks first) and
+opens the launcher window: **Fetch models & sample data**, pick a video, then **Play with live scores** or
+**Annotate this video** (progress, review window and control panel; every change is saved immediately).
+The viewer stays open at the end of the video (`R` replay, `O` open another video, `Q` quit) or loops with
+**Loop playback** / `--loop`. Keys are shown in a footer strip in each window (`h` hides it):
+viewer `q` quit, `space` pause, `f` fast, `r` replay, `o` open; annotation `o` onset, `e` end, `t` type,
+`n` note, `x` exclude, `u` undo, `j`/`l` -5/+5 s, `s` save now. On Linux/macOS: `python -m src.launcher`.
+Details: [docs/SEIZURE_DETECTION.md](docs/SEIZURE_DETECTION.md#quick-start-double-click-startcmd-or-run-startps1).
+
+From a terminal:
 ```bash
 pip install -r requirements-demo.txt
 python scripts/fetch_models.py            # pose models, VSViG-base -> OpenVINO IR, Detector A, Label.xlsx + 2 sample clips (sha256-checked)
-python -m src.run_seizure_demo --input data/pat10/Sz2P.mp4 --labels data/Label.xlsx
+python -m src.run_seizure_demo --input data/pat10/Sz2P.mp4 --labels data/Label.xlsx [--loop]
+python -m src.launcher                    # the launcher window (what start.cmd opens)
 python -m src.review_video                # load your own video and annotate it
 ```
 

@@ -13,14 +13,16 @@ Per video <stem>.<ext>, written next to it:
 Rules: model output never goes into human tiers; on import, a sha256 mismatch is refused and
 Model_* tiers are never read back as human labels. ELAN itself (GPL-3.0) is not bundled;
 only its documented XML format is written (stdlib xml.etree, no extra dependency).
-Research demo, not diagnostic.
+Research use only, not diagnostic.
 """
 from __future__ import annotations
 
+import contextlib
 import csv
 import datetime as _dt
 import hashlib
 import json
+import os
 import uuid
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -30,10 +32,28 @@ EAF_XSD = "http://www.mpi.nl/tools/elan/EAFv3.0.xsd"
 HUMAN_TIERS = ("Seizure", "ILAE2017_type", "EEG_onset", "Notes", "Exclude")
 MODEL_TIERS = ("Model_alarm", "Model_drivers")
 SEIZURE_CV = ("seizure", "possible_seizure", "non_epileptic_event")
+# Pick list for the ILAE2017_type tier (ILAE 2017 operational classification, short forms).
+# The sample dataset's Label.xlsx uses P (focal) and PG (focal to bilateral). Free text is still allowed.
+SEIZURE_TYPES = ("focal aware motor", "focal impaired awareness motor", "focal non-motor",
+                 "focal to bilateral tonic-clonic", "generalized tonic-clonic", "generalized motor (other)",
+                 "generalized non-motor (absence)", "unknown onset motor", "unknown onset non-motor",
+                 "unclassified")
 REGIONS = ("head", "l_arm", "r_arm", "l_hand", "r_hand", "l_leg", "r_leg", "overall")
 
 
 # ── small helpers ─────────────────────────────────────────────
+@contextlib.contextmanager
+def atomic_write(out):
+    """Yield a temp path next to `out`; on success it replaces `out` in one step (os.replace), so a crash
+    or power cut leaves either the old file or the new one, never a half-written file."""
+    out = Path(out)
+    tmp = out.with_name(f".{out.name}.{os.getpid()}.tmp")
+    try:
+        yield tmp
+        os.replace(tmp, out)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
 def sha256_file(path, chunk=1 << 20) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -200,7 +220,8 @@ def write_eaf(ann: dict, video, out=None) -> Path:
         e = ET.SubElement(cv, "CV_ENTRY_ML", CVE_ID=f"cveid_{val}")
         ET.SubElement(e, "CVE_VALUE", LANG_REF="eng").text = val
     ET.indent(root)
-    ET.ElementTree(root).write(out, encoding="UTF-8", xml_declaration=True)
+    with atomic_write(out) as tmp:
+        ET.ElementTree(root).write(tmp, encoding="UTF-8", xml_declaration=True)
     return out
 
 
@@ -271,7 +292,7 @@ def write_signals(rows: list[dict], video) -> Path:
     The header line starts with "#" (ELAN skips it); missing values are written as NaN.
     Read back with e.g. pandas.read_csv(path) and strip the "#" from the first column name."""
     out = paths_for(video)["signals"]
-    with open(out, "w", newline="") as f:
+    with atomic_write(out) as tmp, open(tmp, "w", newline="") as f:
         w = csv.writer(f, lineterminator="\n")
         w.writerow(["#" + SIGNAL_COLS[0]] + SIGNAL_COLS[1:])
         for r in rows:
@@ -318,7 +339,8 @@ def write_tsconf(video, signals_path=None) -> Path:
         ET.SubElement(tr, "range", max=f"{hi:.1f}", min=f"{lo:.1f}")
         ET.SubElement(tr, "color").text = col
     ET.indent(root)
-    ET.ElementTree(root).write(p["tsconf"], encoding="UTF-8", xml_declaration=True)
+    with atomic_write(p["tsconf"]) as tmp:
+        ET.ElementTree(root).write(tmp, encoding="UTF-8", xml_declaration=True)
     return p["tsconf"]
 
 
@@ -340,7 +362,8 @@ def write_pfsx(video, overwrite: bool = False) -> Path | None:
         for n in names:
             ET.SubElement(lst, "String").text = n
     ET.indent(root)
-    ET.ElementTree(root).write(out, encoding="UTF-8", xml_declaration=True)
+    with atomic_write(out) as tmp:
+        ET.ElementTree(root).write(tmp, encoding="UTF-8", xml_declaration=True)
     return out
 
 
@@ -353,7 +376,7 @@ def write_json(ann: dict, video) -> Path:
     a["saved"] = _dt.datetime.now().astimezone().isoformat(timespec="seconds")
     if a.get("model"):
         a["model"] = {k: v for k, v in a["model"].items() if k != "per_second"}   # per-second data: see _signals.csv
-    with open(out, "w") as f:
+    with atomic_write(out) as tmp, open(tmp, "w") as f:
         json.dump(a, f, indent=1)
     return out
 
