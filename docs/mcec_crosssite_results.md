@@ -3,7 +3,7 @@
 Preregistration: `semi-signals/docs/mcec_crosssite_preregistration.md`, committed b2e1dc5
 (timestamp fix aac2348) before any model was trained or any MCEC probability was computed.
 Code: `semi-signals/src/detector_a/{body_only,mcec,mcec_crosssite}.py`. Run on 2026-10-27, about 07:45–08:00 PDT.
-Data: MCEC_Seizure (CC BY 4.0), skeletons only. No SWEC data.
+Data: MCEC_Seizure (CC BY 4.0), skeletons only.
 
 ## Frozen model
 * Detector A-body was trained on all 14 VSViG patients (36 records), using 91 features
