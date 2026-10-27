@@ -92,4 +92,8 @@ Detector A (29/33, 4.3 FA/h, mean AUROC 0.78), under both the Detector A scorer 
 * n = 4 patients and 5 seizures (one of them 2 s). Any result is anecdotal and CIs will be very wide.
 
 ## Deviations
-(none yet)
+* 2026-10-27 ~07:55 PDT (before any scoring): the "frame-contiguous runs" for non-seizure folders are chains of
+  2-s files contiguous in both frame index and filename time. Non-seizure folders mix several source videos with
+  overlapping frame indices, so merging by frame index alone wrongly deduplicated them. Found from record counts
+  (17 runs, 697 s, instead of 147 runs, 3,174 s), not from any score.
+* Results: `docs/mcec_crosssite_results.md`.
