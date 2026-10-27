@@ -11,6 +11,56 @@ estimate. The video + iEEG fusion is plumbing only: no public dataset pairs the 
   5 s smoothed score stays above its threshold for 3 s.
 - **Detector B** (VSViG-base, Apache-2.0 weights, OpenVINO IR): score every 0.5 s on the last 5 s.
 - Markers for the EEG onset and clinical onset from `Label.xlsx`.
+- **Side panel** (all lanes share one time axis):
+  - probability strip: Detector A raw and 5 s smoothed score (0-1), dashed alarm threshold (0.95),
+    seconds in alarm shaded red, current value readout (and Detector B / iEEG lines when enabled);
+  - **top drivers**: once per second, LightGBM `pred_contrib` splits Detector A's score into per-feature
+    contributions; these are summed by body region and feature family (speed, jerk, 0.5-1.5 Hz and 1.5-3 Hz
+    rhythm, visibility, left/right asymmetry, finger motion, people in view) and averaged over the same 5 s
+    window as the score. The top 2-3 positive groups are listed (with a little hysteresis so they do not
+    flicker) once the smoothed score reaches 0.5. When a driver's features are mostly missing, it is labelled
+    "<region> not tracked (pose lost)": the model treats lost tracking as evidence, and the caption says so;
+  - motion graphs (hands, arms, head, legs, whole body; speed in body sizes per second): driver regions get a
+    thick amber line and an amber background; the same joints are ringed on the video;
+  - an EEG lane, greyed out: a layout hook (`explain_view.draw_eeg_lane`) for a future paired EEG stream.
+  - Caption on screen: "Drivers explain the model score, not clinical cause. Research demo, not diagnostic."
+  - Left/right are the patient's left/right (COCO keypoints), not the viewer's.
+- Explanation cost: about 1 ms per second of video on the box CPU (`pred_contrib` once per second), and the
+  panel is redrawn only when new samples arrive. Use `--no-explain` to turn it off, `--timing` for measurements.
+
+## Review your own video (basic, local only)
+```bat
+python -m src.review_video                 :: opens a file picker
+python -m src.review_video --input my_clip.mp4 --annotator AL --pat-id self01
+```
+1. Processes the chosen file once (pose + Detector A + drivers; about real time) and saves
+   `<stem>_semisignals.mp4` and `<stem>_scores.csv` next to it.
+2. Plays the rendered video back in sync, with a timeline bar (red: model alarms, green: your marks).
+   Keys: `space` pause, `j`/`l` back/forward 5 s, `o` clinical onset (new event), `e` clinical end,
+   `t` seizure type, `n` note (attached to the event under the playhead, else a timed note),
+   `x` start/stop an exclude span, `u` undo, `s` save, `q` quit.
+3. Saves next to the original video (format code isolated in `src/annotation.py`):
+   - `<stem>.eaf`: ELAN EAF 3.0 (ms). Tiers `Seizure` (onset-to-end, value from the `seizure_event` CV)
+     with child `ILAE2017_type`, `EEG_onset` (empty for now), `Notes`, `Exclude`, and the model tiers
+     `Model_alarm` (value = peak probability) with child `Model_drivers`. Header properties: video sha256, fps,
+     annotator, patient id/pseudonym, consent, model id, threshold, alarm rule, research-demo flag.
+   - `<stem>_signals.csv` (per second: probability, smoothed probability, alarm state, driver speed, region
+     speeds) and `<stem>_tsconf.xml`, so ELAN's Timeseries Viewer can show the lanes.
+   - `<stem>.annotation.json`: the same content plus a comparison of your marks with the model's alarms
+     (alarm start within 30 s before to 60 s after your marked onset).
+   Re-opening a video reloads its `.eaf`; a sha256 mismatch is refused, and `Model_*` tiers are regenerated,
+   never read back as labels. ELAN (GPL-3.0) is not bundled; only its XML format is written.
+Only use self-recorded or public clips. Other people's videos need their consent, and likely IRB review.
+
+## Roadmap (after Wednesday)
+- Review app: nicer UI (in-window notes box, a progress bar while processing), several annotators per video.
+- Annotation vocabularies: full ILAE 2025 seizure types and ILAE 2022 semiology CVs, `Semiology`/`Laterality`
+  and `Consciousness` tiers, a shared `.etf` ELAN template, and an `ilae2025 -> ilae2017 -> Label.xlsx` map
+  (see `docs/annotation_tools_survey.md` in the workspace).
+- Exports: BIDS `events.tsv` + `events.json`, and `Label.xlsx` rows for the training loader.
+- Check on ELAN 7.0: tsconf column indexing and time units, relative paths after moving a folder.
+- EEG integration: fill the `EEG_onset` tier / `eeg_onset_s` field and the greyed EEG lane from paired EEG
+  (EDF+ annotations), once a dataset with paired video and EEG is available.
 - Optional: an iEEG probability stream (CSV `t,p`, one row per second) replayed alongside, plus the
   noisy-OR fused score. A replay from another patient is unpaired and is labelled that way on screen.
 
