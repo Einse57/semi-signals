@@ -584,7 +584,7 @@ def run_pass(a, M, video, labels, n_pass):
                                    thr_a, marks, extra, alarm_now=alarm_a),
                 ev.draw_drivers(pan_w, hd, drivers if explainer_on else [], p_now) if explainer_on
                 else np.full((hd, pan_w, 3), 30, np.uint8),
-                ev.draw_motion(pan_w, hm, t, chart_span, sc.mot_t, sc.mot, hl_regions, marks),
+                ev.draw_motion(pan_w, hm, t, chart_span, sc.mot_t, sc.mot, set(), marks),
                 ev.draw_eeg_lane(pan_w, he, enabled=False))   # hook: pass a paired EEG stream here later
             new_data = False
         if disp_h < out_h:
