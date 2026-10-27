@@ -26,3 +26,6 @@ Desktop.ini
 # Model files (fetched by scripts/fetch_models.py)
 models/
 demo_recordings/
+
+# Labels and sample videos (fetched by scripts/fetch_models.py)
+data/
