@@ -36,7 +36,8 @@ BAR_H = 74
 def parse_args(argv=None):
     p = argparse.ArgumentParser(description="Review and annotate your own video")
     p.add_argument("--input", default=None, help="video file (default: file picker)")
-    p.add_argument("--detector-a", default="models/detector_a_all.txt")
+    p.add_argument("--detector-a", default="models/detector_a_all.txt",
+                   help="LightGBM model (txt), or 'hf' to fetch the SHA-256-checked model from Hugging Face")
     p.add_argument("--vsvig", default="", help="optional VSViG IR for Detector B (off by default)")
     p.add_argument("--device", default="auto")
     p.add_argument("--no-hands", action="store_true")
@@ -187,6 +188,8 @@ def draw_bar(w, t, dur, ann, alarms, open_excl, status):
 
 def main(argv=None):
     a = parse_args(argv)
+    from src.hf_models import resolve_detector_a
+    a.detector_a = resolve_detector_a(a.detector_a)
     video = a.input or pick_file()
     if not video:
         print("[review] no file chosen"); return

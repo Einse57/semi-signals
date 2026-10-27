@@ -38,7 +38,8 @@ WIN_NAME = "semi-signals | seizure detection demo"
 def parse_args(argv=None):
     p = argparse.ArgumentParser(description="Video seizure detection demo")
     p.add_argument("--input", required=True, help="video file")
-    p.add_argument("--detector-a", default="models/detector_a_all.txt", help="LightGBM model (txt)")
+    p.add_argument("--detector-a", default="models/detector_a_all.txt",
+                   help="LightGBM model (txt), or 'hf' to fetch the SHA-256-checked model from Hugging Face")
     p.add_argument("--detector-a-meta", default=None, help="json with threshold (default: <model>.json)")
     p.add_argument("--vsvig", default="models/vsvig_base.xml", help="VSViG OpenVINO IR / ONNX; '' to disable")
     p.add_argument("--labels", default=None, help="Label.xlsx to draw EEG/clinical onset markers")
@@ -140,6 +141,8 @@ def draw_chart(w, h, now, series, thr, marks, alarm, span=CHART_S):
 
 def main(argv=None):
     a = parse_args(argv)
+    from src.hf_models import resolve_detector_a
+    a.detector_a = resolve_detector_a(a.detector_a)
     from src import config  # applies the OpenVINO iGPU patch for rtmlib
     if a.device == "auto":
         device = config.INFERENCE_DEVICE
