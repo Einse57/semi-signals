@@ -1,6 +1,6 @@
 # Detector A, body-only variant: MCEC_Seizure cross-site check (preregistration)
 
-Written 2026-10-27 07:45 PDT. At this time **no body-only model has been trained and no MCEC probability
+Written 2026-10-27 07:40 PDT (committed b2e1dc5). At this time **no body-only model has been trained and no MCEC probability
 has been computed or looked at.** The MCEC files were opened only to read their format
 (keypoint layout, frame rate, folder labels, segment lengths).
 Everything not listed here follows `docs/detector_a_preregistration.md`.
