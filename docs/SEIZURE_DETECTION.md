@@ -96,8 +96,8 @@ Only use self-recorded or public clips. Other people's videos need their consent
    (verify only, models and data), `--force`, `--skip-vsvig`, `--models-dir`.
    It also downloads `Label.xlsx` and two sample clips from the WU-SAHZU-EMU-Video dataset
    (https://huggingface.co/datasets/xuyankun/WU-SAHZU-EMU-Video, Apache-2.0, pinned commit) into `data\`:
-   `data\Label.xlsx`, `data\pat10\Sz2P.mp4` (36 MB) and `data\pat12\Sz1P.mp4` (484 MB). `data\` is not in git.
-   Data flags: `--clips pat10/Sz1P,pat12/Sz2P` for other clips, `--clips all` for every video (about 27 GB),
+   `data\Label.xlsx`, `data\pat10\Sz2P.mp4` (36 MB) and `data\pat10\Sz1P.mp4` (43 MB). `data\` is not in git.
+   Data flags: `--clips pat12/Sz1P,pat12/Sz2P` for other clips (484 MB and 70 MB), `--clips all` for every video (about 27 GB),
    `--skip-data`, `--data-dir`. Fallback without the script: download `dataset/Label.xlsx` and the clips by hand
    from the dataset page and put them in `data\` without the `dataset/` prefix.
 4. Check the iGPU is visible:

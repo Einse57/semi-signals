@@ -6,12 +6,12 @@ ROOT = Path(__file__).resolve().parent.parent
 spec = importlib.util.spec_from_file_location("fetch_models", ROOT / "scripts" / "fetch_models.py")
 fm = importlib.util.module_from_spec(spec); sys.modules["fetch_models"] = fm; spec.loader.exec_module(fm)
 
-FAKE = {"Label.xlsx": b"labels", "pat10/Sz2P.mp4": b"clip-a", "pat12/Sz1P.mp4": b"clip-b", "pat03/free.mp4": b"clip-c"}
+FAKE = {"Label.xlsx": b"labels", "pat10/Sz2P.mp4": b"clip-a", "pat10/Sz1P.mp4": b"clip-b", "pat03/free.mp4": b"clip-c"}
 H = {k: hashlib.sha256(v).hexdigest() for k, v in FAKE.items()}
 
 
 def _mock(monkeypatch, calls):
-    monkeypatch.setattr(fm, "DATA_SHA256", {k: H[k] for k in ("Label.xlsx", "pat10/Sz2P.mp4", "pat12/Sz1P.mp4")})
+    monkeypatch.setattr(fm, "DATA_SHA256", {k: H[k] for k in ("Label.xlsx", "pat10/Sz2P.mp4", "pat10/Sz1P.mp4")})
 
     def download(url, dst):
         assert url.startswith(fm.DATA_RESOLVE)
@@ -36,12 +36,13 @@ def test_default_clips_paths_manifest_and_skip(tmp_path, monkeypatch):
     monkeypatch.setattr(fm, "step_pose", lambda a, st: st.__setitem__("pose", "skipped"))
     monkeypatch.setattr(fm, "step_detector_a", lambda a, md, man, st: st.__setitem__("detector_a", "ok"))
     assert _run(tmp_path) == 0
-    assert sorted(calls) == ["Label.xlsx", "pat10/Sz2P.mp4", "pat12/Sz1P.mp4"]
+    assert sorted(calls) == ["Label.xlsx", "pat10/Sz1P.mp4", "pat10/Sz2P.mp4"]
     assert (tmp_path / "data" / "Label.xlsx").read_bytes() == b"labels"          # no dataset/ prefix
     assert (tmp_path / "data" / "pat10" / "Sz2P.mp4").exists()
     man = json.loads((tmp_path / "models" / "MANIFEST.json").read_text())
-    assert man["data"]["pat12/Sz1P.mp4"]["sha256"] == H["pat12/Sz1P.mp4"]
+    assert man["data"]["pat10/Sz1P.mp4"]["sha256"] == H["pat10/Sz1P.mp4"]
     assert fm.DATA_REVISION in man["data"]["Label.xlsx"]["source"]
+    assert "pat12/Sz1P.mp4" not in man["data"]                                     # not a default
     calls.clear(); _run(tmp_path)
     assert calls == []                                                            # hashes match: nothing fetched
     (tmp_path / "data" / "Label.xlsx").write_bytes(b"tampered")

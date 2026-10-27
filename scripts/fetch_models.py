@@ -4,7 +4,7 @@
   python scripts/fetch_models.py --offline             # verify only, no network
   python scripts/fetch_models.py --detector-a D:/models/detector_a_all.txt
   python scripts/fetch_models.py --skip-vsvig --force
-  python scripts/fetch_models.py --clips pat10/Sz1P,pat12/Sz2P   # other sample clips (or --clips all, ~27 GB)
+  python scripts/fetch_models.py --clips pat12/Sz1P,pat12/Sz2P   # other sample clips (or --clips all, ~27 GB)
   python scripts/fetch_models.py --skip-data           # models only
 
 What it does:
@@ -55,7 +55,7 @@ DATA_PREFIX = "dataset/"
 DATA_RESOLVE = f"https://huggingface.co/datasets/{DATA_REPO}/resolve/{DATA_REVISION}/{DATA_PREFIX}"
 DATA_TREE_API = f"https://huggingface.co/api/datasets/{DATA_REPO}/tree/{DATA_REVISION}/{DATA_PREFIX.rstrip('/')}?recursive=true"
 DATA_LABELS = "Label.xlsx"
-DEFAULT_CLIPS = "pat10/Sz2P,pat12/Sz1P"
+DEFAULT_CLIPS = "pat10/Sz2P,pat10/Sz1P"
 # sha256 at DATA_REVISION (clips: the LFS oid). Other clips get their sha256 from the tree API at the same commit.
 DATA_SHA256 = {
     "Label.xlsx": "488e6babeb33e78fd05803e2eb094942c43b1212649310b5b174ef0112fbab26",
@@ -274,7 +274,7 @@ def data_tree() -> dict[str, tuple[str | None, int]]:
 
 
 def clip_list(spec: str) -> list[str] | None:
-    """'pat10/Sz2P,pat12/Sz1P' -> ['pat10/Sz2P.mp4', ...]; 'all' -> None; '' or 'none' -> []."""
+    """'pat10/Sz2P,pat10/Sz1P' -> ['pat10/Sz2P.mp4', ...]; 'all' -> None; '' or 'none' -> []."""
     spec = spec.strip()
     if spec.lower() == "all":
         return None
