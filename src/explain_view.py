@@ -165,7 +165,7 @@ def draw_motion(w, h, now, span, t, regions, highlight, marks, floor=0.15):
     out = np.vstack(strips)
     if out.shape[0] < h:
         out = np.vstack([out, np.full((h - out.shape[0], w, 3), 14, np.uint8)])
-    hdr = "Motion (speed, body-size/s; * = top driver)"
+    hdr = "Motion (speed, body-size/s" + ("; * = top driver)" if highlight else ")")
     cv2.putText(out, hdr, (L_M + 60, 13), FONT, 0.34, (120, 120, 120), 1)
     return out
 
