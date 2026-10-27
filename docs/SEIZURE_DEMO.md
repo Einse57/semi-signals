@@ -25,7 +25,7 @@ estimate. The video + iEEG fusion is plumbing only: no public dataset pairs the 
   - an EEG lane, greyed out: a layout hook (`explain_view.draw_eeg_lane`) for a future paired EEG stream.
   - Caption on screen: "Drivers explain the model score, not clinical cause. Research demo, not diagnostic."
   - Left/right are the patient's left/right (COCO keypoints), not the viewer's.
-- Explanation cost: about 1 ms per second of video on the box CPU (`pred_contrib` once per second), and the
+- Explanation cost: about 1 ms per second of video on CPU (`pred_contrib` once per second), and the
   panel is redrawn only when new samples arrive. Use `--no-explain` to turn it off, `--timing` for measurements.
 
 ## Review your own video (basic, local only)
@@ -52,11 +52,10 @@ python -m src.review_video --input my_clip.mp4 --annotator AL --pat-id self01
    never read back as labels. ELAN (GPL-3.0) is not bundled; only its XML format is written.
 Only use self-recorded or public clips. Other people's videos need their consent, and likely IRB review.
 
-## Roadmap (after Wednesday)
+## Roadmap
 - Review app: nicer UI (in-window notes box, a progress bar while processing), several annotators per video.
 - Annotation vocabularies: full ILAE 2025 seizure types and ILAE 2022 semiology CVs, `Semiology`/`Laterality`
-  and `Consciousness` tiers, a shared `.etf` ELAN template, and an `ilae2025 -> ilae2017 -> Label.xlsx` map
-  (see `docs/annotation_tools_survey.md` in the workspace).
+  and `Consciousness` tiers, a shared `.etf` ELAN template, and an `ilae2025 -> ilae2017 -> Label.xlsx` map.
 - Exports: BIDS `events.tsv` + `events.json`, and `Label.xlsx` rows for the training loader.
 - Check on ELAN 7.0: tsconf column indexing and time units, relative paths after moving a folder.
 - EEG integration: fill the `EEG_onset` tier / `eeg_onset_s` field and the greyed EEG lane from paired EEG
@@ -64,8 +63,8 @@ Only use self-recorded or public clips. Other people's videos need their consent
 - Optional: an iEEG probability stream (CSV `t,p`, one row per second) replayed alongside, plus the
   noisy-OR fused score. A replay from another patient is unpaired and is labelled that way on screen.
 
-## Windows setup (Intel Core Ultra laptop, iGPU via OpenVINO)
-1. Install Python 3.11 or 3.12 (64-bit) and the current Intel graphics driver.
+## Windows setup (iGPU via OpenVINO)
+1. Install Python 3.11 or 3.12 (64-bit) and the current graphics driver.
 2. In a terminal, from the repo root:
    ```bat
    python -m venv .venv
@@ -100,7 +99,7 @@ Only use self-recorded or public clips. Other people's videos need their consent
    `--save out.mp4` to record the rendered demo, `--log scores.csv` for per-second scores,
    `--ieeg probs.csv --ieeg-offset 0` for an iEEG replay.
 
-## Demo runbook (Andrew's MTL laptop; rehearsed on the ARL, Arc 140T)
+## Demo runbook
 
 **The day before (online):** do the setup above, then run each clip once with `--headless --fast` so the
 pose models download and OpenVINO compiles its GPU kernels. Copy `demo_recordings\` onto the laptop.
@@ -119,7 +118,7 @@ python -m src.run_seizure_demo --input data\pat12_Sz1P.mp4 --labels data\Label.x
 | 2 | `pat10_Sz1P` (35 s) | alert about 11 s after clinical onset | detection on a patient the model never saw |
 | 3 | `pat10_Sz2P` (32 s) | score peaks at 0.94, just under 0.95, **no alert** | honest miss; the threshold trades misses for fewer false alarms |
 
-The ARL (Arc iGPU, OpenVINO) gives the same alerts as the CPU runs, at the same seconds (scores differ by a few
+On an iGPU (OpenVINO) the demo gives the same alerts as the CPU runs, at the same seconds (scores differ by a few
 hundredths because the GPU runs pose at lower precision). It keeps up with real time with hands on.
 
 **Talking points (honest):**
@@ -128,7 +127,8 @@ hundredths because the GPU runs pose at lower precision). It keeps up with real 
 - The false-alarm estimate rests on only 3.7 h of non-seizure video, mostly from three patients; real monitoring
   would need many more hours. Videos start close to the seizure, which flatters recall.
 - Detector B (VSViG-base) curves are shown for comparison; the released weights saw all 14 patients, so they
-  are not evidence. A leave-one-patient-out retrain is in progress (`docs/vsvig_lopo_preregistration.md`).
+  are not evidence. A preregistered leave-one-patient-out retrain (`docs/vsvig_lopo_preregistration.md`) detected 27/33 at
+  10.7 false alarms/h, so it does not beat Detector A.
 - iEEG fusion is plumbing: there is no public dataset with paired video and iEEG, so any iEEG overlay is an
   unpaired replay and is labelled on screen.
 - Research prototype, not a medical device. Video stays on the laptop; nothing is uploaded.
@@ -139,7 +139,7 @@ pre-rendered recordings below.
 ## Fallback
 `demo_recordings\` (not in git) holds pre-rendered mp4s of the same runs in case the laptop misbehaves:
 `pat12_Sz1P_heldout_90s.mp4`, `pat10_Sz1P_heldout.mp4`, `pat10_Sz2P_heldout.mp4` (held-out Detector A models), plus
-`pat10_Sz1P_arl.mp4` and `pat10_Sz2P_arl.mp4` recorded on the ARL's Arc iGPU.
+`pat10_Sz1P_igpu.mp4` and `pat10_Sz2P_igpu.mp4` recorded on an iGPU.
 
 ## Licences of what the demo loads
 - semi-signals: MIT. VSViG code and weights, WU-SAHZU-EMU-Video: Apache-2.0.

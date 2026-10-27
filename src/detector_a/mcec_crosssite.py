@@ -14,7 +14,7 @@ from .body_only import load_vsvig, body_features, BODY_NAMES
 from .labels import read_labels, video_key, second_labels
 from .mcec import load_mcec
 
-V = "/workspace/vsvig"
+V = os.environ.get("SEMI_SIGNALS_WORK", "work")  # work dir with data/, results/, external/ (outside git)
 KP, XLSX = f"{V}/data/kp", f"{V}/data/Label.xlsx"
 CACHE = f"{V}/data/featcache_body"
 OUT = f"{V}/results/mcec_crosssite"

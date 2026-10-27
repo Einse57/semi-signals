@@ -1,4 +1,4 @@
-"""Late fusion of a per-second iEEG/EEG seizure probability (e.g. szpipe) with a
+"""Late fusion of a per-second iEEG/EEG seizure probability (e.g. from a separate iEEG model) with a
 per-second video probability (Detector A / VSViG).
 
 STATUS: plumbing only. No public dataset pairs video with iEEG, so the fusion rule

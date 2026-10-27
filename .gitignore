@@ -19,3 +19,6 @@ build/
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# Local wheels
+*.whl

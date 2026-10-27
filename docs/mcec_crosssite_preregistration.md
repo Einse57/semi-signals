@@ -10,7 +10,7 @@ Changes after this point go under "Deviations" with a reason and a timestamp.
 * Kuang, Wang, Sun, Zhao, Shi, Zhu (2024), Mendeley Data V1, doi:10.17632/pyxwfn94xm.1, **CC BY 4.0**.
   Preprocessing code: github.com/kuirh/GATCN_MAE. Hospital not named; China.
   The archive (`MEEC_Seizure.7z`, sha256 c4d6fac4…24f3) holds **skeleton CSVs only, no video**.
-  It lives outside the repo at `/workspace/vsvig/external/mcec/`. No SWEC data is involved.
+  It lives outside the repo, under the work directory at `external/mcec/`. No SWEC data is involved.
 * Format: one CSV per ~2 s segment (`frame, landmark_id, x, y, z, visibility`), 50 frames each.
   33 MediaPipe-Pose landmarks; x and y are normalised to the (half-)frame width and height.
   Frame rate is **25 fps** (frame index = 25 × file time + const in the seizure folders).
