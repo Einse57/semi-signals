@@ -5,6 +5,37 @@ evaluation on 14 patients (see `docs/detector_a_results.md`); Detector B uses th
 weights, which were trained on the same 14 patients, so its scores on those videos are not an honest
 estimate. The video + iEEG fusion is plumbing only: no public dataset pairs the two.
 
+## Quick start: double-click start.cmd (or run .\start.ps1)
+On Windows, from the repo folder:
+1. Double-click `start.cmd` (or run `.\start.ps1` in PowerShell). The first time, if there is no `.venv`, it
+   offers to create one and install the requirements (the same steps as [Windows setup](#windows-setup-igpu-via-openvino),
+   including the OpenCV fix). Behind a proxy, set `HTTPS_PROXY` first, or answer `n` to see the manual steps.
+2. In the launcher window, click **Fetch models & sample data** once (output in the log pane; the optional
+   **Proxy** field sets `HTTPS_PROXY` for the download). VSViG is skipped when torch is not installed.
+3. Pick a sample clip from the **Video** list (`data\pat*\*.mp4`) or **Browse...** to any video.
+   `Label.xlsx` is filled in automatically and only used for clips from the sample dataset.
+4. Choose **Device** (GPU is selected when OpenVINO lists it, else CPU) and the options: **Loop playback**,
+   **Hands**, **Explanations**, **VSViG** (enabled once `models\vsvig_base.xml` exists).
+5. **Play with live scores** opens the viewer. When the video ends the window stays open on the last frame
+   (graphs visible): `R` replay, `O` open another video, `Q` quit. With **Loop playback** it restarts by itself.
+6. **Annotate this video**: fill in **Annotator initials**, **Patient ID / pseudonym** (never a real name) and
+   **Video source** (remembered between sessions). The launcher shows the processing progress (pose and
+   scoring pass), then the review window opens with a control panel next to it (see
+   [Review your own video](#review-your-own-video-basic-local-only)). Every change is saved immediately.
+7. **Open output folder** opens the folder of the selected video, where the annotation files are written.
+
+The launcher stays open while the viewer or the annotation tool runs; their output and any errors appear in
+its log pane (also kept in `%APPDATA%\semi-signals\launcher.log`). Settings are remembered in
+`%APPDATA%\semi-signals\launcher.json` (`~/.semi-signals/` on Linux and macOS). On Linux or macOS run
+`python -m src.launcher` from the repo folder (needs tkinter, e.g. the `python3-tk` package).
+
+Keys (also shown in a footer strip in each window; `h` hides or shows it):
+- Viewer: `q` quit, `space` pause/play, `f` fast / real-time pacing, `r` replay from the start,
+  `o` open another video, `h` show/hide the key legend.
+- Annotation: `o` clinical onset, `e` clinical end, `g` EEG onset, `t` seizure type, `n` note,
+  `x` exclude start/stop, `u` undo, `space` pause, `j` / `l` back / forward 5 s, `r` replay, `s` save now,
+  `h` show/hide the key legend, `q` quit.
+
 ## Live viewer (`src.run_seizure_demo`)
 - The video, with the tracked patient's body skeleton and hands.
 - **Detector A** (pose features + LightGBM, trained here): score every second, alert when the
@@ -23,22 +54,35 @@ estimate. The video + iEEG fusion is plumbing only: no public dataset pairs the 
   - motion graphs (hands, arms, head, legs, whole body; speed in body sizes per second): driver regions get a
     thick amber line and an amber background; the same joints are ringed on the video;
   - an EEG lane, greyed out: a layout hook (`explain_view.draw_eeg_lane`) for a future paired EEG stream.
-  - Caption on screen: "Drivers explain the model score, not clinical cause. Research demo, not diagnostic."
+  - Caption on screen: "Drivers explain the model score, not clinical cause. Research use only, not diagnostic."
   - Left/right are the patient's left/right (COCO keypoints), not the viewer's.
+- End of video: the window stays open on the last frame with the graphs and the score strip, and shows
+  "End of video: R replay, O open another video, Q quit" (`O` opens a file picker). `--loop` restarts by
+  itself (`--max-loops N` to stop after N passes), `--exit-at-end` closes the window instead. A replay resets
+  all causal state (buffers, smoothing, alarms, explanations, graphs), so the scores repeat exactly.
 - Explanation cost: about 1 ms per second of video on CPU (`pred_contrib` once per second), and the
   panel is redrawn only when new samples arrive. Use `--no-explain` to turn it off, `--timing` for measurements.
 
 ## Review your own video (basic, local only)
+Start it from the launcher (**Annotate this video**), or from a terminal:
 ```bat
 python -m src.review_video                 :: opens a file picker
 python -m src.review_video --input my_clip.mp4 --annotator AL --pat-id self01
 ```
+Missing details are asked for in dialogs, not in the terminal.
 1. Processes the chosen file once (pose + Detector A + drivers; about real time) and saves
    `<stem>_semisignals.mp4` and `<stem>_scores.csv` next to it.
 2. Plays the rendered video back in sync, with a timeline bar (red: model alarms, green: your marks).
    Keys: `space` pause, `j`/`l` back/forward 5 s, `o` clinical onset (new event), `e` clinical end,
-   `t` seizure type, `n` note (attached to the event under the playhead, else a timed note),
-   `x` start/stop an exclude span, `u` undo, `s` save, `q` quit.
+   `g` EEG onset, `t` seizure type (pick list of ILAE 2017 types, or type your own),
+   `n` note (attached to the event under the playhead, else a timed note), `x` start/stop an exclude span,
+   `u` undo, `s` save now, `r` replay from the start, `h` show/hide the key legend, `q` quit.
+   A control panel next to the video has the same actions as buttons (Onset, End, EEG onset, Type...,
+   Note..., Exclude start/stop, Undo, Back 5 s, Pause/Play, Fwd 5 s, Replay, Save now), plus **Open folder**
+   and **Open in ELAN** (ELAN from its usual Windows install folder, else whatever opens `.eaf` files).
+   Autosave: every change is written straight away (to a temporary file, then swapped in, so a crash never
+   leaves a half-written `.eaf`); the status shows `saved hh:mm:ss`. Quitting needs no save prompt.
+   At the end of the video the window stays on the last frame: `r` replay, `q` quit.
 3. Saves next to the original video (format code isolated in `src/annotation.py`):
    - `<stem>.eaf`: ELAN EAF 3.0 (ms). Tiers `Seizure` (onset-to-end, value from the `seizure_event` CV)
      with child `ILAE2017_type`, `EEG_onset` (empty for now), `Notes`, `Exclude`, and the model tiers
@@ -69,7 +113,8 @@ Only use self-recorded or public clips. Other people's videos need their consent
   (EDF+ annotations), once a dataset with paired video and EEG is available.
 
 ## Windows setup (iGPU via OpenVINO)
-1. Install Python 3.11 or 3.12 (64-bit) and the current graphics driver.
+1. Install Python 3.10, 3.11 or 3.12 (64-bit, with tcl/tk for the launcher) and the current graphics driver.
+   `start.cmd` does steps 2 and 5 for you; the steps below are the manual route.
 2. In a terminal, from the repo root:
    ```bat
    python -m venv .venv
@@ -110,8 +155,9 @@ Only use self-recorded or public clips. Other people's videos need their consent
    python -m src.run_seizure_demo --input data\pat10\Sz2P.mp4 --labels data\Label.xlsx ^
        --detector-a models\detector_a_all.txt --vsvig models\vsvig_base.xml
    ```
-   Keys: `q` quit, `space` pause, `f` toggle real-time pacing.
-   Options: `--device cpu` to force CPU, `--no-hands`, `--start 3500` to jump into a long video,
+   Keys: `q` quit, `space` pause, `f` toggle real-time pacing, `r` replay, `o` open another video,
+   `h` show/hide the key legend.
+   Options: `--loop` to repeat the video, `--device cpu` to force CPU, `--no-hands`, `--start 3500` to jump into a long video,
    `--save out.mp4` to record the rendered output, `--log scores.csv` for per-second scores,
    `--ieeg probs.csv --ieeg-offset 0` for an iEEG replay.
 
