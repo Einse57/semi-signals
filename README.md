@@ -90,7 +90,7 @@ live viewer and an annotation tool:
 
 ```bash
 pip install -r requirements-demo.txt
-python scripts/fetch_models.py            # pose models, VSViG-base -> OpenVINO IR, Detector A (sha256-checked)
+python scripts/fetch_models.py            # pose models, VSViG-base -> OpenVINO IR, Detector A, Label.xlsx + 2 sample clips (sha256-checked)
 python -m src.run_seizure_demo --input data/pat10/Sz2P.mp4 --labels data/Label.xlsx
 python -m src.review_video                # load your own video and annotate it
 ```

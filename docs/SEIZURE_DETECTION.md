@@ -81,7 +81,8 @@ Only use self-recorded or public clips. Other people's videos need their consent
    (rtmlib pulls in opencv-contrib-python; two OpenCV wheels in one venv can break `cv2`.)
    With pyenv-win, call the venv's `python.exe` by full path in `.cmd` scripts: calling the `python`
    shim (a `.bat`) without `call` ends the script after that line.
-3. Fetch and verify the models (while online; safe to re-run, it skips files whose sha256 already matches):
+3. Fetch and verify the models, labels and sample clips (while online; safe to re-run, it skips files whose
+   sha256 already matches):
    ```bat
    pip install torch --index-url https://download.pytorch.org/whl/cpu   :: only needed to convert VSViG once
    python scripts\fetch_models.py
@@ -92,9 +93,13 @@ Only use self-recorded or public clips. Other people's videos need their consent
    https://huggingface.co/Einse57/semi-signals-detector-a at a pinned commit, all sha256-checked; hashes go in
    `models\MANIFEST.json`. To use a local copy instead:
    `python scripts\fetch_models.py --detector-a D:\path\detector_a_all.txt`. Other flags: `--offline`
-   (verify only), `--force`, `--skip-vsvig`, `--models-dir`.
-   Videos: put `data\Label.xlsx` and some videos from https://huggingface.co/datasets/xuyankun/WU-SAHZU-EMU-Video
-   (Apache-2.0) in `data\`, e.g. `data\pat10\Sz2P.mp4` (not in git).
+   (verify only, models and data), `--force`, `--skip-vsvig`, `--models-dir`.
+   It also downloads `Label.xlsx` and two sample clips from the WU-SAHZU-EMU-Video dataset
+   (https://huggingface.co/datasets/xuyankun/WU-SAHZU-EMU-Video, Apache-2.0, pinned commit) into `data\`:
+   `data\Label.xlsx`, `data\pat10\Sz2P.mp4` (36 MB) and `data\pat10\Sz1P.mp4` (43 MB). `data\` is not in git.
+   Data flags: `--clips pat12/Sz1P,pat12/Sz2P` for other clips (484 MB and 70 MB), `--clips all` for every video (about 27 GB),
+   `--skip-data`, `--data-dir`. Fallback without the script: download `dataset/Label.xlsx` and the clips by hand
+   from the dataset page and put them in `data\` without the `dataset/` prefix.
 4. Check the iGPU is visible:
    ```bat
    python -c "import openvino as ov; print(ov.Core().available_devices)"

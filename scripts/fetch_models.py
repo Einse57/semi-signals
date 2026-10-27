@@ -1,22 +1,27 @@
-"""Fetch, verify and convert the models the seizure demo uses (idempotent, sha256-checked).
+"""Fetch, verify and convert the models and sample data the seizure detector uses (idempotent, sha256-checked).
 
-  python scripts/fetch_models.py                       # everything into ./models
+  python scripts/fetch_models.py                       # models into ./models, labels + 2 sample clips into ./data
   python scripts/fetch_models.py --offline             # verify only, no network
   python scripts/fetch_models.py --detector-a D:/models/detector_a_all.txt
   python scripts/fetch_models.py --skip-vsvig --force
+  python scripts/fetch_models.py --clips pat12/Sz1P,pat12/Sz2P   # other sample clips (or --clips all, ~27 GB)
+  python scripts/fetch_models.py --skip-data           # models only
 
 What it does:
 1. Pose models (YOLOX-tiny, RTMPose-m body7 and hand5): downloads them into rtmlib's own cache
-   (the same files `src/config.py` points at), so the demo starts without a download.
+   (the same files `src/config.py` points at), so the live viewer starts without a download.
 2. VSViG-base: downloads `VSViG-base.pth` and `dy_point_order.pt` from the official repository
    (github.com/xuyankun/VSViG, pinned commit), checks sha256, then converts to ONNX and OpenVINO IR
    with `src/export_vsvig.py` only if the IR is missing or was built from different weights.
-   Conversion needs torch (CPU build is enough); the demo itself does not.
+   Conversion needs torch (CPU build is enough); the live viewer itself does not.
 3. Detector A: downloads from the Hugging Face repo `Einse57/semi-signals-detector-a` with the pinned
    SHA-256s in `src/hf_models.py`,
    or copies a local model given with `--detector-a PATH` (its `.json` sidecar is taken from next to it).
+4. Sample data: `Label.xlsx` and a few clips from the Hugging Face dataset `xuyankun/WU-SAHZU-EMU-Video`
+   (Apache-2.0, pinned commit) into --data-dir, without the dataset's `dataset/` prefix
+   (e.g. `data/Label.xlsx`, `data/pat10/Sz2P.mp4`).
 
-Hashes of everything in --models-dir are recorded in `<models-dir>/MANIFEST.json`.
+Hashes of everything in --models-dir are recorded in `<models-dir>/MANIFEST.json` (sample data under "data").
 Works on Windows, macOS and Linux. Model files are not part of the repository.
 """
 from __future__ import annotations
@@ -43,6 +48,27 @@ POSE_SHA256 = {
         "39e858936bca0f94c09847d4e70b68a51d6c0adac61f36b457fcadb54621cd29",
 }
 
+# Sample data: WU-SAHZU-EMU-Video (VSViG authors), Hugging Face dataset, pinned commit.
+DATA_REPO = "xuyankun/WU-SAHZU-EMU-Video"
+DATA_REVISION = "d26859e666ddfeb00eede0fadde03642d9e8ef1e"
+DATA_PREFIX = "dataset/"
+DATA_RESOLVE = f"https://huggingface.co/datasets/{DATA_REPO}/resolve/{DATA_REVISION}/{DATA_PREFIX}"
+DATA_TREE_API = f"https://huggingface.co/api/datasets/{DATA_REPO}/tree/{DATA_REVISION}/{DATA_PREFIX.rstrip('/')}?recursive=true"
+DATA_LABELS = "Label.xlsx"
+DEFAULT_CLIPS = "pat10/Sz2P,pat10/Sz1P"
+# sha256 at DATA_REVISION (clips: the LFS oid). Other clips get their sha256 from the tree API at the same commit.
+DATA_SHA256 = {
+    "Label.xlsx": "488e6babeb33e78fd05803e2eb094942c43b1212649310b5b174ef0112fbab26",
+    "pat10/Sz1P.mp4": "1105f64e01e9a0ef5c2446e130d49f7955986ff3698b034aa0ed325b0d7702ce",
+    "pat10/Sz2P.mp4": "41644d9940a5e15e0b49ecedc3277adc78eabb6c32fcfdb5802694aa107c36ce",
+    "pat12/Sz1P.mp4": "092ca70fe46c02c3398cb2e2d1ddb084b0d09706d44ade61fba7eea68e28cc07",
+    "pat12/Sz2P.mp4": "fbaafd24e7050acc95822c5957a295036281875a28656f6d1b85adaaa116da1d",
+}
+DATA_CREDIT = """\
+  Sample data: WU-SAHZU-EMU-Video, https://huggingface.co/datasets/xuyankun/WU-SAHZU-EMU-Video
+    (Yankun Xu, Mohamad Sawan et al., VSViG, ECCV 2024) - Apache License 2.0. Patient faces are
+    masked by the dataset authors."""
+
 sys.path.insert(0, str(ROOT))
 from src import hf_models  # noqa: E402  (Detector A repo, revision and pinned SHA-256s live there)
 
@@ -53,7 +79,7 @@ Attribution
     https://github.com/xuyankun/VSViG - Apache License 2.0.
   rtmlib, RTMPose, YOLOX: Apache-2.0. Note: the YOLOX-tiny checkpoint was trained with Human-Art
     (non-commercial licence) and the RTMPose body7/hand5 checkpoints include research-only datasets.
-  Research demo only, not a medical device."""
+  Research use only, not a medical device."""
 
 
 def sha256(p: Path) -> str:
@@ -107,7 +133,7 @@ def pose_urls() -> list[str]:
 
 
 def step_pose(a, status):
-    print("[1/3] pose models (rtmlib cache)")
+    print("[1/4] pose models (rtmlib cache)")
     try:
         from rtmlib.tools.file import download_checkpoint, _get_rtmhub_dir
     except ImportError:
@@ -135,7 +161,7 @@ def step_pose(a, status):
 
 # ── 2. VSViG-base weights + OpenVINO IR ──────────────────────
 def step_vsvig(a, md: Path, man: Manifest, status):
-    print("[2/3] VSViG-base (github.com/xuyankun/VSViG @ %s)" % VSVIG_COMMIT[:7])
+    print("[2/4] VSViG-base (github.com/xuyankun/VSViG @ %s)" % VSVIG_COMMIT[:7])
     for name, want in VSVIG_FILES.items():
         p = md / name
         if ok_file(p, want) and not (a.force and not a.offline):
@@ -180,7 +206,7 @@ def step_vsvig(a, md: Path, man: Manifest, status):
 def step_detector_a(a, md: Path, man: Manifest, status):
     if a.detector_a:
         src = Path(a.detector_a).expanduser().resolve()
-        print(f"[3/3] Detector A (local file {src})")
+        print(f"[3/4] Detector A (local file {src})")
         side = src.with_suffix(".json")
         if not src.exists():
             status["detector_a"] = f"FAILED: {src} not found"; print("    " + status["detector_a"]); return
@@ -195,10 +221,10 @@ def step_detector_a(a, md: Path, man: Manifest, status):
             man.set(dst.name, sha256=h, source=f"local:{p.name}")
             print(f"    ok  {dst.name}  sha256 {h[:12]}...{note}")
         if not side.exists():
-            print(f"    warning: no {side.name} next to the model; the demo needs it for the threshold")
+            print(f"    warning: no {side.name} next to the model; the live viewer needs it for the threshold")
         status["detector_a"] = "ok (local)"; return
 
-    print(f"[3/3] Detector A (huggingface.co/{hf_models.HF_REPO}, via src/hf_models.py)")
+    print(f"[3/4] Detector A (huggingface.co/{hf_models.HF_REPO}, via src/hf_models.py)")
     pins = hf_models.EXPECTED_SHA256
     need = [n for n, h in pins.items() if a.force or not ok_file(md / n, h)]
     for n in pins:
@@ -231,6 +257,86 @@ def step_detector_a(a, md: Path, man: Manifest, status):
     status["detector_a"] = "ok"
 
 
+# ── 4. sample data (labels + clips) ─────────────────────────
+def fetch_json(url: str):
+    req = urllib.request.Request(url, headers={"User-Agent": "semi-signals-fetch-models"})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+def data_tree() -> dict[str, tuple[str | None, int]]:
+    """{relative path without 'dataset/': (sha256 or None, size)} at DATA_REVISION."""
+    out = {}
+    for e in fetch_json(DATA_TREE_API):
+        if e.get("type") == "file" and e["path"].startswith(DATA_PREFIX):
+            out[e["path"][len(DATA_PREFIX):]] = ((e.get("lfs") or {}).get("oid"), int(e.get("size", 0)))
+    return out
+
+
+def clip_list(spec: str) -> list[str] | None:
+    """'pat10/Sz2P,pat10/Sz1P' -> ['pat10/Sz2P.mp4', ...]; 'all' -> None; '' or 'none' -> []."""
+    spec = spec.strip()
+    if spec.lower() == "all":
+        return None
+    if spec.lower() in ("", "none"):
+        return []
+    return [c.strip().replace("\\", "/") + ("" if c.strip().endswith(".mp4") else ".mp4") for c in spec.split(",") if c.strip()]
+
+
+def step_data(a, man: Manifest, status):
+    dd = Path(a.data_dir).expanduser().resolve()
+    print(f"[4/4] sample data (huggingface.co/datasets/{DATA_REPO} @ {DATA_REVISION[:7]}) -> {dd}")
+    clips = clip_list(a.clips)
+    rec = man.d.setdefault("data", {})
+    pins = dict(DATA_SHA256)
+    tree = None
+    need_tree = clips is None or any(c not in pins for c in clips)
+    if need_tree and not a.offline:
+        try:
+            tree = data_tree()
+        except OSError as e:
+            status["data"] = f"FAILED: could not list the dataset ({type(e).__name__}). Retry, or use --skip-data."
+            print("    " + status["data"]); return
+        for k, (h, _) in tree.items():
+            if h and k not in pins:
+                pins[k] = h
+    if clips is None:
+        clips = sorted(k for k in tree if k.endswith(".mp4")) if tree else sorted(k for k in rec if k.endswith(".mp4"))
+        if tree and not a.offline:
+            gb = sum(tree[k][1] for k in clips) / 1e9
+            print(f"    warning: --clips all is {len(clips)} videos, about {gb:.1f} GB")
+    wanted = [DATA_LABELS] + clips
+    bad = []
+    for rel in wanted:
+        want = pins.get(rel) or (rec.get(rel) or {}).get("sha256")
+        if want is None and a.offline:
+            bad.append(f"{rel}: no pinned sha256 (run once online)"); continue
+        if tree is not None and rel not in tree:
+            bad.append(f"{rel}: not in the dataset"); continue
+        dst = dd / Path(rel)
+        if ok_file(dst, want) and want is not None and not (a.force and not a.offline):
+            print(f"    ok  {rel}")
+        elif a.offline:
+            bad.append(f"{rel} missing or hash mismatch"); continue
+        else:
+            try:
+                download(DATA_RESOLVE + rel, dst)
+            except OSError as e:
+                bad.append(f"{rel}: download failed ({type(e).__name__})"); continue
+            h = sha256(dst)
+            if want is not None and h != want:
+                dst.unlink()
+                bad.append(f"{rel}: sha256 mismatch ({h[:12]}...)"); continue
+            want = h
+            print(f"    ok  {rel} (downloaded, {dst.stat().st_size / 1e6:.1f} MB, sha256 verified)")
+        rec[rel] = {"sha256": want, "path": str(dst), "source": f"hf-dataset:{DATA_REPO}@{DATA_REVISION}",
+                    "license": "Apache-2.0"}
+    status["data"] = "ok" if not bad else "FAILED: " + "; ".join(bad)
+    if bad:
+        print("    " + status["data"])
+    print(DATA_CREDIT)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--models-dir", default=str(ROOT / "models"))
@@ -238,6 +344,10 @@ def main(argv=None):
     ap.add_argument("--skip-vsvig", action="store_true", help="skip VSViG download and conversion")
     ap.add_argument("--force", action="store_true", help="download and convert again even if files verify")
     ap.add_argument("--offline", action="store_true", help="no network: only verify what is already there")
+    ap.add_argument("--skip-data", action="store_true", help="skip Label.xlsx and the sample clips")
+    ap.add_argument("--clips", default=DEFAULT_CLIPS,
+                    help=f"sample clips, comma-separated patNN/SzNP (default {DEFAULT_CLIPS}); 'all' for every video (~27 GB)")
+    ap.add_argument("--data-dir", default=str(ROOT / "data"), help="where Label.xlsx and the clips go (default ./data)")
     a = ap.parse_args(argv)
     md = Path(a.models_dir).expanduser().resolve(); md.mkdir(parents=True, exist_ok=True)
     man = Manifest(md / "MANIFEST.json")
@@ -248,6 +358,10 @@ def main(argv=None):
     else:
         step_vsvig(a, md, man, status)
     step_detector_a(a, md, man, status)
+    if a.skip_data:
+        status["data"] = "skipped"
+    else:
+        step_data(a, man, status)
     man.save()
     print("\nSummary (models dir: %s)" % md)
     for k, v in status.items():
