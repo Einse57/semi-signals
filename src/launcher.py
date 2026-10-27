@@ -66,16 +66,17 @@ def sample_clips(data_dir: Path) -> list[Path]:
     """data/pat*/*.mp4 as fetched by scripts/fetch_models.py (rendered outputs skipped)."""
     if not data_dir.is_dir():
         return []
-    return sorted(p for p in data_dir.glob("pat*/*.mp4") if not p.name.endswith(SKIP_SUFFIXES))
+    return sorted(p for p in data_dir.glob("**/pat*/*.mp4") if not p.name.endswith(SKIP_SUFFIXES))
 
 
 def is_dataset_clip(video: Path, data_dir: Path) -> bool:
-    """Label.xlsx only describes the sample dataset: data/patNN/<seizure>.mp4."""
+    """Label.xlsx only describes the sample dataset: data/patNN/<seizure>.mp4, also when the clips sit
+    one or more folders deeper, e.g. data/dataset/patNN/<seizure>.mp4 from a manual download."""
     try:
         rel = video.resolve().relative_to(data_dir.resolve())
     except ValueError:
         return False
-    return len(rel.parts) == 2 and rel.parts[0].lower().startswith("pat")
+    return len(rel.parts) >= 2 and rel.parts[-2].lower().startswith("pat")
 
 
 def models_status(models_dir: Path, data_dir: Path) -> str:

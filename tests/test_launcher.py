@@ -16,6 +16,7 @@ def test_sample_clips_and_dataset_check(tmp_path):
     d = _data(tmp_path)
     assert [p.name for p in L.sample_clips(d)] == ["Sz1P.mp4", "Sz2P.mp4"]
     assert L.is_dataset_clip(d / "pat10" / "Sz1P.mp4", d)
+    assert L.is_dataset_clip(d / "dataset" / "pat10" / "Sz2P.mp4", d)
     assert not L.is_dataset_clip(d / "other.mp4", d)
     assert not L.is_dataset_clip(tmp_path / "mine.mp4", d)
     assert L.sample_clips(tmp_path / "nope") == []
