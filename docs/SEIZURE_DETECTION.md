@@ -45,11 +45,23 @@ python -m src.review_video --input my_clip.mp4 --annotator AL --pat-id self01
      `Model_alarm` (value = peak probability) with child `Model_drivers`. Header properties: video sha256, fps,
      annotator, patient id/pseudonym, consent, model id, threshold, alarm rule, research-demo flag.
    - `<stem>_signals.csv` (per second: probability, smoothed probability, alarm state, driver speed, region
-     speeds) and `<stem>_tsconf.xml`, so ELAN's Timeseries Viewer can show the lanes.
+     speeds; the header line starts with `#`, missing values are `NaN`), `<stem>_tsconf.xml` (track setup)
+     and `<stem>.pfsx` (ELAN viewer layout, written only if absent), so ELAN's Timeseries Viewer shows the
+     lanes on open. Keep the files together; ELAN finds them again after the folder is moved or unzipped.
    - `<stem>.annotation.json`: the same content plus a comparison of your marks with the model's alarms
      (alarm start within 30 s before to 60 s after your marked onset).
    Re-opening a video reloads its `.eaf`; a sha256 mismatch is refused, and `Model_*` tiers are regenerated,
    never read back as labels. ELAN (GPL-3.0) is not bundled; only its XML format is written.
+If the ELAN Timeseries Viewer shows no curves (checked on ELAN 7.0):
+- Tracks loaded but no panel shows them: right-click in the Timeseries Viewer, then
+  `TrackPanel` > `Add All Tracks` (or `Add TrackPanel For Each Track`).
+- No tracks at all: right-click, `Configure Tracks...`, pick `<stem>_signals.csv` under
+  `Select a source to configure`, `Select`. On the `Add` tab set `Time Column Index` = 1, leave
+  `Continuous Rate` unticked, and add one track per lane: `Track Name`, `Column` (1-based: p_seizure 2,
+  p_smooth5s 3, alarm 4, driver_speed 5, speed_head ... speed_overall 6-13), `(Preferred) Range` >
+  `Manual Setting` (0-1 for probabilities, 0-1.5 for speeds), `Add`. `Close`, then add them to a panel as above.
+- The CSV is not linked: `Edit` > `Linked Files...`, `Linked Secondary Files`, `Add...`, pick the CSV, `Apply`.
+
 Only use self-recorded or public clips. Other people's videos need their consent, and likely IRB review.
 
 ## Future work
