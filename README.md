@@ -67,6 +67,38 @@ semi-signals/
 └── README.md
 ```
 
+## Seizure detection (research)
+
+> **Research demo only. Not a medical device and not a diagnostic.** Trained on one hospital's data and
+> **not yet validated across sites.**
+
+semi-signals also includes a video-only seizure detector built on the semi-signals pose pipeline, plus an explainable
+live demo and an annotation tool:
+
+- **Detector A**: causal per-second pose features (region speeds, 0.5-1.5 Hz and 1.5-3 Hz rhythm, visibility,
+  people in view) and a LightGBM classifier; alarm when the 5 s mean stays at or above 0.95 for 3 s.
+  Trained and evaluated on the [VSViG](https://github.com/xuyankun/VSViG) WU-SAHZU EMU videos
+  (Apache-2.0; Xu, Sawan et al., ECCV 2024), 14 patients, 35 recordings.
+- **Detector B (reference)**: the released VSViG-base model (vendored code in `third_party/vsvig`, Apache-2.0).
+- **Demo**: probability strip with alarm shading, top drivers from LightGBM `pred_contrib`, and per-region
+  motion graphs; review your own video and save ELAN-compatible `.eaf` annotations.
+- **Measurements** (each preregistered before scoring, see `docs/*_preregistration.md`):
+  leave-one-patient-out on VSViG, 29/33 seizures detected with the scoring code's window (clinical onset - 30 s
+  to min(onset + 120 s, recording end) + 60 s; 26/33 with an onset-only -30/+60 s window) at 4.3 false alarms/h.
+  On a second site (MCEC_Seizure, 4 patients, skeletons only) a frozen body-only model caught 2/5 at 11.3/h,
+  with chance-level per-second ranking: [docs/mcec_crosssite_results.md](docs/mcec_crosssite_results.md).
+
+```bash
+pip install -r requirements-demo.txt
+python scripts/fetch_models.py            # pose models, VSViG-base -> OpenVINO IR, Detector A (sha256-checked)
+python -m src.run_seizure_demo --input data/pat10/Sz2P.mp4 --labels data/Label.xlsx
+python -m src.review_video                # load your own video and annotate it
+```
+
+Model weights are not in this repository. Details: [docs/SEIZURE_DEMO.md](docs/SEIZURE_DEMO.md),
+[docs/detector_a_results.md](docs/detector_a_results.md),
+[docs/mcec_crosssite_results.md](docs/mcec_crosssite_results.md). Third-party attribution: [NOTICE](NOTICE).
+
 ## References
 
 - Xu et al., *"VSViG: Real-time Video-based Seizure Detection via Skeleton-based Spatiotemporal ViG"*, ECCV 2024. [arXiv:2311.14775](https://arxiv.org/abs/2311.14775)

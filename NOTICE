@@ -1,0 +1,17 @@
+semi-signals
+Copyright (c) 2026 Andrew F Lamkin (MIT License, see LICENSE)
+
+This repository includes third-party code:
+
+third_party/vsvig/VSViG.py and third_party/vsvig/dy_point_order.pt
+  From VSViG, https://github.com/xuyankun/VSViG
+  Yankun Xu, Junzhe Wang, Yun-Hsuan Chen, Jie Yang, Wenjie Ming, Shuang Wang and Mohamad Sawan,
+  "VSViG: Real-Time Video-Based Seizure Detection via Skeleton-Based Spatiotemporal ViG", ECCV 2024.
+  Licensed under the Apache License, Version 2.0 (third_party/vsvig/LICENSE).
+  Modified: removed timm/torchvision imports; the partition file path is resolved next to VSViG.py.
+
+Models and data used at run time are not included and keep their own licences:
+  VSViG-base weights and the WU-SAHZU-EMU-Video dataset (Apache-2.0, by the VSViG authors);
+  rtmlib, RTMPose and YOLOX (Apache-2.0); the YOLOX-tiny checkpoint was trained with Human-Art
+  (non-commercial licence) and the RTMPose body7/hand5 checkpoints include research-only datasets;
+  MCEC_Seizure skeletons (CC BY 4.0, Kuang et al., 2024).
