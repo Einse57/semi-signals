@@ -6,6 +6,8 @@ Per video <stem>.<ext>, written next to it:
                           Provenance in HEADER PROPERTY elements.
   <stem>_signals.csv      per-second model probability, alarm state and region speeds
   <stem>_tsconf.xml       ELAN Timeseries Viewer track setup for the CSV
+  <stem>.pfsx             ELAN per-document preferences: which tracks go in which viewer panel
+                          (only written if absent; ELAN keeps the user's layout there)
   <stem>.annotation.json  the same content as plain JSON (the app's own copy)
 
 Rules: model output never goes into human tiers; on import, a sha256 mismatch is refused and
@@ -101,10 +103,10 @@ def write_eaf(ann: dict, video, out=None) -> Path:
     hdr = ET.SubElement(root, "HEADER", MEDIA_FILE="", TIME_UNITS="milliseconds")
     ET.SubElement(hdr, "MEDIA_DESCRIPTOR", MEDIA_URL=v.as_uri(), MIME_TYPE="video/mp4",
                   RELATIVE_MEDIA_URL="./" + v.name)
-    ET.SubElement(hdr, "LINKED_FILE_DESCRIPTOR", LINK_URL=p["signals"].as_uri(),
+    ET.SubElement(hdr, "LINKED_FILE_DESCRIPTOR", LINK_URL=link_url(p["signals"]),
                   RELATIVE_LINK_URL="./" + p["signals"].name, MIME_TYPE="text/plain", TIME_ORIGIN="0",
                   ASSOCIATED_WITH=v.as_uri())
-    ET.SubElement(hdr, "LINKED_FILE_DESCRIPTOR", LINK_URL=p["tsconf"].as_uri(),
+    ET.SubElement(hdr, "LINKED_FILE_DESCRIPTOR", LINK_URL=link_url(p["tsconf"]),
                   RELATIVE_LINK_URL="./" + p["tsconf"].name, MIME_TYPE="text/xml")
     m = ann.get("model") or {}
     props = [("URN", f"urn:nl-mpi-tools-elan-eaf:{uuid.uuid4()}"), ("semisignals_schema", SCHEMA),
@@ -240,47 +242,77 @@ def read_eaf(eaf, video=None) -> dict:
 
 
 # ── signals CSV + ELAN timeseries config ─────────────────────
+# Format notes, checked against the ELAN 7.0 source (GPL-3.0; read only, nothing copied or bundled):
+#  * CSVReader skips empty lines and lines starting with "#", so the header row is written as a "#" line.
+#    A plain header row would be read as a data sample.
+#  * Column indices in a _tsconf.xml are 0-based (the Configure Tracks dialog shows 1-based numbers and
+#    subtracts 1 before storing them).
+#  * The time column is parsed as seconds when the values contain a "." (e.g. 12.0000), else as ms.
+#  * An unparseable cell becomes NaN and is drawn as a gap; "NaN" parses cleanly, a blank cell logs a
+#    warning, and a blank last cell is dropped by the split and read as 0, so missing values are "NaN".
+#  * The tsconf is only read through the .eaf's LINKED_FILE_DESCRIPTOR (name must end in _tsconf.xml).
+#    Its tracksource source-url must be the exact string of the CSV's LINK_URL in the .eaf: ELAN relocates
+#    moved linked files (same folder as the .eaf, then RELATIVE_LINK_URL) and rewrites a source-url only
+#    when it equals an old LINK_URL. A relative source-url never matches, so no tracks are created.
+#  * Loaded tracks are only drawn in a panel listed in the per-document preferences (<eafstem>.pfsx next
+#    to the .eaf: TimeSeriesViewer.NumberOfPanels and TimeSeriesViewer.Panel-<n>); without it the viewer
+#    shows one empty panel with a 0-100 ruler.
 SIGNAL_COLS = ["t_s", "p_seizure", "p_smooth5s", "alarm", "driver_speed"] + [f"speed_{r}" for r in REGIONS]
+TS_PROVIDER = "mpi.eudico.client.annotator.timeseries.csv.CSVServiceProvider"
+
+
+def link_url(path) -> str:
+    """The file URL used for LINK_URL in the .eaf and for source-url in the _tsconf.xml (must be identical)."""
+    return Path(path).resolve().as_uri()
 
 
 def write_signals(rows: list[dict], video) -> Path:
-    """rows: per-second dicts with keys of SIGNAL_COLS (t_s = end of the 1 s window, seconds)."""
+    """rows: per-second dicts with keys of SIGNAL_COLS (t_s = end of the 1 s window, seconds).
+    The header line starts with "#" (ELAN skips it); missing values are written as NaN.
+    Read back with e.g. pandas.read_csv(path) and strip the "#" from the first column name."""
     out = paths_for(video)["signals"]
     with open(out, "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(SIGNAL_COLS)
+        w = csv.writer(f, lineterminator="\n")
+        w.writerow(["#" + SIGNAL_COLS[0]] + SIGNAL_COLS[1:])
         for r in rows:
             vals = []
             for c in SIGNAL_COLS:
                 x = r.get(c)
-                vals.append("" if x is None or x != x else (f"{x:.4f}" if isinstance(x, float) else x))
+                if x is None or x == "" or (isinstance(x, float) and x != x):
+                    vals.append("NaN")
+                elif c == "t_s":
+                    vals.append(f"{float(x):.4f}")      # always has a "." so ELAN reads seconds
+                else:
+                    vals.append(f"{x:.4f}" if isinstance(x, float) else str(x))
             w.writerow(vals)
     return out
 
 
+SPEED_MAX = 1.5   # fixed y range for speed lanes (ELAN's CSV loader ignores detect-range); clips above it
 _TRACKS = [("p_smooth5s", "Detector A 5 s smoothed probability (alarm threshold in header)", "p", 0, 1, "0,220,0"),
            ("p_seizure", "Detector A raw per-second probability", "p", 0, 1, "0,110,0"),
            ("alarm", "Detector A alarm state (0/1)", "", 0, 1, "255,40,40"),
-           ("driver_speed", "mean speed of the top-driver regions (blank when none)", "body/s", 0, 1, "255,190,0")] + \
-          [(f"speed_{r}", f"{r} speed", "body/s", 0, 1, c) for r, c in
+           ("driver_speed", "mean speed of the top-driver regions (gap when none)", "body/s", 0, SPEED_MAX, "255,190,0")] + \
+          [(f"speed_{r}", f"{r} speed", "body/s", 0, SPEED_MAX, c) for r, c in
            zip(REGIONS, ("255,255,0", "0,200,0", "0,0,200", "128,255,0", "100,100,255", "0,200,0", "0,0,200", "180,180,180"))]
+# Timeseries Viewer panels (track names per panel), written to <stem>.pfsx
+TS_PANELS = [["p_smooth5s", "p_seizure", "alarm"], ["driver_speed"], [f"speed_{r}" for r in REGIONS]]
 
 
-def write_tsconf(video, signals_path=None, relative: bool = False) -> Path:
-    """ELAN Timeseries Viewer config (<stem>_tsconf.xml). Column indices are 1-based (as in
-    ELAN's Configure Tracks dialog); time column = t_s in seconds. To verify on ELAN 7.0."""
+def write_tsconf(video, signals_path=None) -> Path:
+    """ELAN Timeseries Viewer config (<stem>_tsconf.xml): one CSV source, 0-based columns, time column 0
+    (t_s, seconds), sample type "Discontinuous Rate" (explicit time stamps)."""
     p = paths_for(video)
-    sig = Path(signals_path or p["signals"]).resolve()
-    url = "./" + sig.name if relative else sig.as_uri()
+    sig = Path(signals_path or p["signals"])
     root = ET.Element("timeseries", date=_dt.datetime.now().astimezone().isoformat(timespec="seconds"), version="1.0")
-    src = ET.SubElement(root, "tracksource", {"sample-type": "Continuous Rate", "source-url": url,
-                                               "time-column": "1"})
-    ET.SubElement(src, "property", key="provider", value="mpi.eudico.client.annotator.timeseries.csv.CSVServiceProvider")
+    src = ET.SubElement(root, "tracksource", {"sample-type": "Discontinuous Rate", "source-url": link_url(sig),
+                                               "time-column": str(SIGNAL_COLS.index("t_s"))})
+    ET.SubElement(src, "property", key="provider", value=TS_PROVIDER)
     for name, desc, units, lo, hi, col in _TRACKS:
         tr = ET.SubElement(src, "track", derivative="0", name=name)
         ET.SubElement(tr, "property", key="detect-range", value="false")
         sp = ET.SubElement(tr, "sample-position")
-        ET.SubElement(sp, "pos", col=str(SIGNAL_COLS.index(name) + 1), row="0")
+        ET.SubElement(sp, "pos", col=str(SIGNAL_COLS.index(name)), row="0")
         ET.SubElement(tr, "description").text = desc
         ET.SubElement(tr, "units").text = units
         ET.SubElement(tr, "range", max=f"{hi:.1f}", min=f"{lo:.1f}")
@@ -288,6 +320,28 @@ def write_tsconf(video, signals_path=None, relative: bool = False) -> Path:
     ET.indent(root)
     ET.ElementTree(root).write(p["tsconf"], encoding="UTF-8", xml_declaration=True)
     return p["tsconf"]
+
+
+def write_pfsx(video, overwrite: bool = False) -> Path | None:
+    """Per-document ELAN preferences (<stem>.pfsx next to the .eaf) that put the CSV tracks into
+    Timeseries Viewer panels. ELAN rewrites this file with the user's own layout, so an existing one is
+    kept unless overwrite=True. Returns None when kept."""
+    out = paths_for(video)["eaf"].with_suffix(".pfsx")
+    if out.exists() and not overwrite:
+        return None
+    XSI = "http://www.w3.org/2001/XMLSchema-instance"
+    ET.register_namespace("xsi", XSI)
+    root = ET.Element("preferences", {"version": "1.1",
+                                      f"{{{XSI}}}noNamespaceSchemaLocation": "http://www.mpi.nl/tools/elan/Prefs_v1.1.xsd"})
+    pref = ET.SubElement(root, "pref", key="TimeSeriesViewer.NumberOfPanels")
+    ET.SubElement(pref, "Int").text = str(len(TS_PANELS))
+    for i, names in enumerate(TS_PANELS, 1):
+        lst = ET.SubElement(root, "prefList", key=f"TimeSeriesViewer.Panel-{i}")
+        for n in names:
+            ET.SubElement(lst, "String").text = n
+    ET.indent(root)
+    ET.ElementTree(root).write(out, encoding="UTF-8", xml_declaration=True)
+    return out
 
 
 def write_json(ann: dict, video) -> Path:
@@ -304,12 +358,15 @@ def write_json(ann: dict, video) -> Path:
     return out
 
 
-def save_all(ann: dict, video, relative_tsconf: bool = False) -> dict:
-    """Write .eaf, _signals.csv, _tsconf.xml and .annotation.json next to the video."""
+def save_all(ann: dict, video) -> dict:
+    """Write .eaf, _signals.csv, _tsconf.xml, .pfsx (only if absent) and .annotation.json next to the video."""
     out = {}
     if ann.get("model") and ann["model"].get("per_second"):
         out["signals"] = write_signals(ann["model"]["per_second"], video)
-        out["tsconf"] = write_tsconf(video, relative=relative_tsconf)
+        out["tsconf"] = write_tsconf(video)
+        pf = write_pfsx(video)
+        if pf:
+            out["pfsx"] = pf
     out["eaf"] = write_eaf(ann, video)
     out["json"] = write_json(ann, video)
     return out

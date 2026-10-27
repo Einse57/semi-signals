@@ -11,7 +11,7 @@ Step 2 (review): plays the rendered video in sync, with a timeline of model alar
          g EEG onset (optional) | t seizure type | n note (attached to the event under the playhead, else a timed note)
          x exclude span start/stop | u undo last mark | s save | q quit (asks to save)
 Saves next to the ORIGINAL video (see src/annotation.py): <stem>.eaf (ELAN), <stem>_signals.csv,
-<stem>_tsconf.xml, <stem>.annotation.json.
+<stem>_tsconf.xml, <stem>.pfsx (ELAN viewer layout, only if absent), <stem>.annotation.json.
 
 Everything stays on this computer. Research demo, not diagnostic. Use self-recorded or public
 clips; other people's videos need their consent (and likely IRB review) before any use.
@@ -46,7 +46,6 @@ def parse_args(argv=None):
     p.add_argument("--consent", default="self", choices=["self", "public", "consented", "unknown"])
     p.add_argument("--reprocess", action="store_true")
     p.add_argument("--headless-process", action="store_true", help="no window while processing")
-    p.add_argument("--relative-tsconf", action="store_true", help="relative CSV path in _tsconf.xml (portable folder)")
     p.add_argument("--keys", default=None, help="testing: scripted keys 't:key[:text];...' (no window)")
     return p.parse_args(argv)
 
@@ -226,7 +225,7 @@ def main(argv=None):
     def save():
         ann["model"] = A.model_section(model_id, meta_thr, alarms, per_second(rows))
         ann["comparison"] = compare(ann["events"], alarms)
-        out = A.save_all(ann, video, relative_tsconf=a.relative_tsconf)
+        out = A.save_all(ann, video)
         print("[review] saved: " + ", ".join(str(p) for p in out.values()))
         for c in ann["comparison"]["events"]:
             print(f"[review] event {c['event']}: onset {A.hms(c['clinical_onset_s'])} -> "
