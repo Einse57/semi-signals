@@ -1,0 +1,11 @@
+# Seizure demo (Windows, iGPU via OpenVINO). torch is NOT needed to run the demo.
+numpy>=1.24
+opencv-python>=4.8
+onnxruntime>=1.17
+openvino>=2024.0
+rtmlib>=0.0.15
+lightgbm>=4.0
+huggingface_hub>=0.23  # optional: fetch Detector A from the Hub
+scipy>=1.11
+pandas>=2.0
+openpyxl>=3.1
