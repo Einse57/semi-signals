@@ -1,7 +1,7 @@
 # Detector A (keypoint motion features + LightGBM): leave-one-patient-out results
 
 Run: 2026-10-25 ~22:20 PT, after the preregistration in `docs/detector_a_preregistration.md` (20:53 PT).
-Data: WU-SAHZU EMU video set (14 patients, 36 videos; 33 labelled seizures, 3.73 h of interictal video).
+Data: WU-SAHZU EMU video set (14 patients; 35 of the 37 recordings used, see Deviations; 33 labelled seizures, 3.73 h of interictal video).
 Keypoints: `src/batch_extract.py` (RTMPose via rtmlib, 6 samples/s). Code: `python -m src.detector_a.lopo`.
 
 ## Headline (preregistered primary rule: nested inner-LOPO threshold)
@@ -13,6 +13,12 @@ Keypoints: `src/batch_extract.py` (RTMPose via rtmlib, 6 samples/s). Code: `pyth
 | delay vs clinical onset | median 18 s (IQR 5 to 34) |
 | delay vs EEG onset | median 28 s (IQR 13 to 50) |
 | per-second AUROC, held-out patient | mean 0.78 (range 0.69-0.92) |
+
+Detection window for the table above (the scoring code's window): an alarm counts if it overlaps
+[clinical onset - 30 s, min(clinical onset + 120 s, recording end) + 60 s]. With the stricter onset-only window
+[clinical onset - 30 s, clinical onset + 60 s] it is **26/33** (Wilson 95% 0.62-0.89), median delay 13 s vs
+clinical onset, with the same 4.3 false alarms/h (see `docs/mcec_crosssite_results.md`). Alarm rule: 5 s trailing
+mean at or above 0.95 for at least 3 s, alarms under 30 s apart merged.
 
 Secondary rule (fixed threshold 0.5): 33/33 detected (Wilson 0.90-1.00), but 16.4 false alarms/h
 (Poisson 12.5-21.0); median delay 1 s vs clinical onset.

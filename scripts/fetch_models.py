@@ -1,0 +1,260 @@
+"""Fetch, verify and convert the models the seizure demo uses (idempotent, sha256-checked).
+
+  python scripts/fetch_models.py                       # everything into ./models
+  python scripts/fetch_models.py --offline             # verify only, no network
+  python scripts/fetch_models.py --detector-a D:/models/detector_a_all.txt
+  python scripts/fetch_models.py --skip-vsvig --force
+
+What it does:
+1. Pose models (YOLOX-tiny, RTMPose-m body7 and hand5): downloads them into rtmlib's own cache
+   (the same files `src/config.py` points at), so the demo starts without a download.
+2. VSViG-base: downloads `VSViG-base.pth` and `dy_point_order.pt` from the official repository
+   (github.com/xuyankun/VSViG, pinned commit), checks sha256, then converts to ONNX and OpenVINO IR
+   with `src/export_vsvig.py` only if the IR is missing or was built from different weights.
+   Conversion needs torch (CPU build is enough); the demo itself does not.
+3. Detector A: downloads from the Hugging Face repo `Einse57/semi-signals-detector-a` with the pinned
+   SHA-256s in `src/hf_models.py`,
+   or copies a local model given with `--detector-a PATH` (its `.json` sidecar is taken from next to it).
+
+Hashes of everything in --models-dir are recorded in `<models-dir>/MANIFEST.json`.
+Works on Windows, macOS and Linux. Model files are not part of the repository.
+"""
+from __future__ import annotations
+import argparse, ast, hashlib, json, os, shutil, subprocess, sys, tempfile, urllib.request
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+
+VSVIG_COMMIT = "1026e7e7f2287b96f3cc375830f2836ffdf4588e"
+VSVIG_RAW = f"https://raw.githubusercontent.com/xuyankun/VSViG/{VSVIG_COMMIT}/"
+VSVIG_FILES = {
+    "VSViG-base.pth": "0a95e3e0093730dc535e21a84f04943c73549a2b6a19a85e33aebc7c64f965a9",
+    "dy_point_order.pt": "9aa778ca1221f47b6afe0242787becfdfaae3f2424b54dd15a48c585ef0a0ced",
+}
+VSVIG_IR_STEM = "vsvig_base"
+
+# sha256 of the extracted .onnx files in rtmlib's cache
+POSE_SHA256 = {
+    "yolox_tiny_8xb8-300e_humanart-6f3252f9.onnx":
+        "ceb11c07298f95c50d7c5abeb906d03340c85f23aa79e3e66966e7fb6c307250",
+    "rtmpose-m_simcc-body7_pt-body7_420e-256x192-e48f03d0_20230504.onnx":
+        "5c0a4bf67953e6d2ac43ce15e77dc9d5d354ae18430a47d2c5963a7bc5683e3c",
+    "rtmpose-m_simcc-hand5_pt-aic-coco_210e-256x256-74fb594_20230320.onnx":
+        "39e858936bca0f94c09847d4e70b68a51d6c0adac61f36b457fcadb54621cd29",
+}
+
+sys.path.insert(0, str(ROOT))
+from src import hf_models  # noqa: E402  (Detector A repo, revision and pinned SHA-256s live there)
+
+ATTRIBUTION = """\
+Attribution
+  VSViG code and VSViG-base weights: Yankun Xu and Mohamad Sawan, "VSViG: Real-time Video-based
+    Seizure Detection via Skeleton-based Spatiotemporal ViG", ECCV 2024.
+    https://github.com/xuyankun/VSViG - Apache License 2.0.
+  rtmlib, RTMPose, YOLOX: Apache-2.0. Note: the YOLOX-tiny checkpoint was trained with Human-Art
+    (non-commercial licence) and the RTMPose body7/hand5 checkpoints include research-only datasets.
+  Research demo only, not a medical device."""
+
+
+def sha256(p: Path) -> str:
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        for b in iter(lambda: f.read(1 << 20), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
+def download(url: str, dst: Path):
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=dst.parent, suffix=".part")
+    os.close(fd)
+    try:
+        print(f"    downloading {url}")
+        req = urllib.request.Request(url, headers={"User-Agent": "semi-signals-fetch-models"})
+        with urllib.request.urlopen(req, timeout=60) as r, open(tmp, "wb") as f:
+            shutil.copyfileobj(r, f, 1 << 20)
+        os.replace(tmp, dst)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+
+
+class Manifest:
+    def __init__(self, path: Path):
+        self.path = path
+        self.d = json.loads(path.read_text()) if path.exists() else {}
+
+    def set(self, name, **kw):
+        self.d[name] = kw
+
+    def save(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(json.dumps(self.d, indent=2, sort_keys=True) + "\n")
+
+
+def ok_file(p: Path, want: str | None) -> bool:
+    return p.exists() and (want is None or sha256(p) == want)
+
+
+# ── 1. pose models via rtmlib ────────────────────────────────
+def pose_urls() -> list[str]:
+    tree = ast.parse((ROOT / "src" / "config.py").read_text(encoding="utf-8"))
+    urls = []
+    for n in tree.body:
+        if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id.endswith("_ONNX_URL") for t in n.targets):
+            urls.append(ast.literal_eval(n.value))
+    return urls
+
+
+def step_pose(a, status):
+    print("[1/3] pose models (rtmlib cache)")
+    try:
+        from rtmlib.tools.file import download_checkpoint, _get_rtmhub_dir
+    except ImportError:
+        status["pose"] = "FAILED: rtmlib not installed (pip install -r requirements-demo.txt)"
+        print("    " + status["pose"]); return
+    cache = Path(_get_rtmhub_dir()) / "checkpoints"
+    bad = []
+    for url in pose_urls():
+        onnx = cache / (Path(url).name.split(".")[0] + ".onnx")
+        want = POSE_SHA256.get(onnx.name)
+        if a.force and onnx.exists() and not a.offline:
+            onnx.unlink()
+        if not ok_file(onnx, want):
+            if a.offline:
+                bad.append(f"{onnx.name} missing or hash mismatch"); continue
+            if onnx.exists():
+                onnx.unlink()  # wrong hash: fetch again
+            onnx = Path(download_checkpoint(url))
+            if not ok_file(onnx, want):
+                bad.append(f"{onnx.name} sha256 mismatch after download"); continue
+        print(f"    ok  {onnx.name}  sha256 {sha256(onnx)[:12]}...")
+    status["pose"] = "ok" if not bad else "FAILED: " + "; ".join(bad)
+    print(f"    cache: {cache}")
+
+
+# ── 2. VSViG-base weights + OpenVINO IR ──────────────────────
+def step_vsvig(a, md: Path, man: Manifest, status):
+    print("[2/3] VSViG-base (github.com/xuyankun/VSViG @ %s)" % VSVIG_COMMIT[:7])
+    for name, want in VSVIG_FILES.items():
+        p = md / name
+        if ok_file(p, want) and not (a.force and not a.offline):
+            print(f"    ok  {name}")
+        elif a.offline:
+            status["vsvig"] = f"FAILED: {name} missing or hash mismatch"; print("    " + status["vsvig"]); return
+        else:
+            download(VSVIG_RAW + name, p)
+            if not ok_file(p, want):
+                status["vsvig"] = f"FAILED: {name} sha256 mismatch ({sha256(p)})"; print("    " + status["vsvig"]); return
+            print(f"    ok  {name} (downloaded)")
+        man.set(name, sha256=want, source=VSVIG_RAW + name, license="Apache-2.0")
+    vendored = ROOT / "third_party" / "vsvig" / "dy_point_order.pt"
+    if vendored.exists() and sha256(vendored) != VSVIG_FILES["dy_point_order.pt"]:
+        print("    warning: third_party/vsvig/dy_point_order.pt differs from the official file")
+
+    xml, bin_, onnx = (md / (VSVIG_IR_STEM + s) for s in (".xml", ".bin", ".onnx"))
+    rec = man.d.get(xml.name, {})
+    fresh = (xml.exists() and bin_.exists() and rec.get("from_sha256") == VSVIG_FILES["VSViG-base.pth"]
+             and rec.get("sha256") == sha256(xml) and man.d.get(bin_.name, {}).get("sha256") == sha256(bin_))
+    if fresh and not a.force:
+        print(f"    ok  {xml.name} / {bin_.name} (built from the pinned weights)")
+        status["vsvig"] = "ok"; return
+    if a.offline:
+        status["vsvig"] = "FAILED: OpenVINO IR missing or stale (run without --offline)"; print("    " + status["vsvig"]); return
+    print("    converting to ONNX + OpenVINO IR with src/export_vsvig.py")
+    r = subprocess.run([sys.executable, "-m", "src.export_vsvig", "--weights", str(md / "VSViG-base.pth"),
+                        "--out", str(md / VSVIG_IR_STEM)], cwd=ROOT)
+    if r.returncode != 0 or not (xml.exists() and bin_.exists()):
+        status["vsvig"] = ("FAILED: conversion failed (needs torch, onnx, onnxruntime, openvino; e.g. "
+                           "pip install torch --index-url https://download.pytorch.org/whl/cpu)")
+        print("    " + status["vsvig"]); return
+    for p in (onnx, bin_):
+        if p.exists():
+            man.set(p.name, sha256=sha256(p), from_sha256=VSVIG_FILES["VSViG-base.pth"], built_by="src/export_vsvig.py")
+    man.set(xml.name, sha256=sha256(xml), from_sha256=VSVIG_FILES["VSViG-base.pth"], built_by="src/export_vsvig.py")
+    print(f"    ok  {xml.name} / {bin_.name} (converted)")
+    status["vsvig"] = "ok"
+
+
+# ── 3. Detector A ────────────────────────────────────────────
+def step_detector_a(a, md: Path, man: Manifest, status):
+    if a.detector_a:
+        src = Path(a.detector_a).expanduser().resolve()
+        print(f"[3/3] Detector A (local file {src})")
+        side = src.with_suffix(".json")
+        if not src.exists():
+            status["detector_a"] = f"FAILED: {src} not found"; print("    " + status["detector_a"]); return
+        for p in [src] + ([side] if side.exists() else []):
+            dst = md / p.name
+            if p != dst.resolve():
+                if not (dst.exists() and sha256(dst) == sha256(p)):
+                    shutil.copy2(p, dst)
+            h = sha256(dst)
+            pinned = hf_models.EXPECTED_SHA256.get(dst.name)
+            note = "" if pinned is None else (" (matches pinned release)" if pinned == h else " (differs from pinned release)")
+            man.set(dst.name, sha256=h, source=f"local:{p.name}")
+            print(f"    ok  {dst.name}  sha256 {h[:12]}...{note}")
+        if not side.exists():
+            print(f"    warning: no {side.name} next to the model; the demo needs it for the threshold")
+        status["detector_a"] = "ok (local)"; return
+
+    print(f"[3/3] Detector A (huggingface.co/{hf_models.HF_REPO}, via src/hf_models.py)")
+    pins = hf_models.EXPECTED_SHA256
+    need = [n for n, h in pins.items() if a.force or not ok_file(md / n, h)]
+    for n in pins:
+        if n not in need:
+            man.set(n, sha256=pins[n], source=f"hf:{hf_models.HF_REPO}")
+    if not need:
+        print("    ok  " + ", ".join(pins) + " present and verified"); status["detector_a"] = "ok"; return
+    if a.offline:
+        status["detector_a"] = "FAILED: missing or unverified: " + ", ".join(need); print("    " + status["detector_a"]); return
+    try:
+        from huggingface_hub.utils import RepositoryNotFoundError, EntryNotFoundError, HfHubHTTPError
+    except ImportError:
+        status["detector_a"] = "FAILED: huggingface_hub not installed (pip install huggingface_hub)"; print("    " + status["detector_a"]); return
+    try:
+        for n in need:
+            if a.force and (md / n).exists():
+                (md / n).unlink()
+            hf_models._fetch(n, local_dir=str(md))  # downloads and refuses a SHA-256 mismatch
+            man.set(n, sha256=pins[n], source=f"hf:{hf_models.HF_REPO}")
+            print(f"    ok  {n} (downloaded, sha256 verified)")
+    except (RepositoryNotFoundError, EntryNotFoundError):
+        status["detector_a"] = (f"NOT AVAILABLE: {hf_models.HF_REPO} (or a file in it) is not published on Hugging Face "
+                                "yet. Use --detector-a PATH to point at a local detector_a_*.txt (with its .json).")
+        print("    " + status["detector_a"]); return
+    except SystemExit as e:  # hf_models refuses a hash mismatch this way
+        status["detector_a"] = f"FAILED: {e}"; print("    " + status["detector_a"]); return
+    except (HfHubHTTPError, OSError) as e:
+        status["detector_a"] = f"FAILED: could not reach Hugging Face ({type(e).__name__}). Retry, or use --detector-a PATH."
+        print("    " + status["detector_a"]); return
+    status["detector_a"] = "ok"
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("--models-dir", default=str(ROOT / "models"))
+    ap.add_argument("--detector-a", default=None, metavar="PATH", help="use a local Detector A model (.txt, with .json next to it)")
+    ap.add_argument("--skip-vsvig", action="store_true", help="skip VSViG download and conversion")
+    ap.add_argument("--force", action="store_true", help="download and convert again even if files verify")
+    ap.add_argument("--offline", action="store_true", help="no network: only verify what is already there")
+    a = ap.parse_args(argv)
+    md = Path(a.models_dir).expanduser().resolve(); md.mkdir(parents=True, exist_ok=True)
+    man = Manifest(md / "MANIFEST.json")
+    status = {}
+    step_pose(a, status)
+    if a.skip_vsvig:
+        status["vsvig"] = "skipped"
+    else:
+        step_vsvig(a, md, man, status)
+    step_detector_a(a, md, man, status)
+    man.save()
+    print("\nSummary (models dir: %s)" % md)
+    for k, v in status.items():
+        print(f"  {k:11s} {v}")
+    print("\n" + ATTRIBUTION)
+    return 0 if all(v.startswith(("ok", "skipped")) for v in status.values()) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

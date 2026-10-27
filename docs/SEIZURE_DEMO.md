@@ -8,7 +8,7 @@ estimate. The video + iEEG fusion is plumbing only: no public dataset pairs the 
 ## What it shows
 - The video, with the tracked patient's body skeleton and hands.
 - **Detector A** (pose features + LightGBM, trained here): score every second, alert when the
-  5 s smoothed score stays above its threshold for 3 s.
+  5 s smoothed score stays at or above its threshold (0.95) for 3 s.
 - **Detector B** (VSViG-base, Apache-2.0 weights, OpenVINO IR): score every 0.5 s on the last 5 s.
 - Markers for the EEG onset and clinical onset from `Label.xlsx`.
 - **Side panel** (all lanes share one time axis):
@@ -76,14 +76,20 @@ Only use self-recorded or public clips. Other people's videos need their consent
    (rtmlib pulls in opencv-contrib-python; two OpenCV wheels in one venv can break `cv2`.)
    With pyenv-win, call the venv's `python.exe` by full path in `.cmd` scripts: calling the `python`
    shim (a `.bat`) without `call` ends the script after that line.
-3. Put the files in `models\` and `data\` (not in git):
-   - `models\detector_a_all.txt` and `models\detector_a_all.json` (Detector A, trained on all 14 patients)
-   - `models\vsvig_base.xml` and `models\vsvig_base.bin` (VSViG-base converted to OpenVINO IR with
-     `python -m src.export_vsvig --weights VSViG-base.pth --out models\vsvig_base`; needs torch)
-   - `data\Label.xlsx` and some videos from https://huggingface.co/datasets/xuyankun/WU-SAHZU-EMU-Video
-     (Apache-2.0), e.g. `data\pat10\Sz2P.mp4`
-   The pose ONNX models download automatically on first run (rtmlib cache in `%USERPROFILE%\.cache\rtmlib`).
-   Run once while online before the demo.
+3. Fetch and verify the models (while online; safe to re-run, it skips files whose sha256 already matches):
+   ```bat
+   pip install torch --index-url https://download.pytorch.org/whl/cpu   :: only needed to convert VSViG once
+   python scripts\fetch_models.py
+   ```
+   This fills rtmlib's cache with the pose models (`%USERPROFILE%\.cache\rtmlib`), downloads VSViG-base from
+   github.com/xuyankun/VSViG and converts it to `models\vsvig_base.xml/.bin` (only if missing or stale), and
+   downloads Detector A (`models\detector_a_all.txt/.json`) from Hugging Face, all sha256-checked; hashes go in
+   `models\MANIFEST.json`. Until the Hugging Face repo is published, pass a local copy:
+   `python scripts\fetch_models.py --detector-a D:\path\detector_a_all.txt`. Other flags: `--offline`
+   (verify only), `--force`, `--skip-vsvig`, `--models-dir`.
+   The held-out models for the runbook (`detector_a_wo_pat10/12`) are copied the same way with `--detector-a`.
+   Videos: put `data\Label.xlsx` and some videos from https://huggingface.co/datasets/xuyankun/WU-SAHZU-EMU-Video
+   (Apache-2.0) in `data\`, e.g. `data\pat10\Sz2P.mp4` (not in git).
 4. Check the iGPU is visible:
    ```bat
    python -c "import openvino as ov; print(ov.Core().available_devices)"
@@ -122,8 +128,10 @@ On an iGPU (OpenVINO) the demo gives the same alerts as the CPU runs, at the sam
 hundredths because the GPU runs pose at lower precision). It keeps up with real time with hands on.
 
 **Talking points (honest):**
-- Detector A, leave-one-patient-out on 14 patients: 29/33 seizures detected (95% CI 0.73-0.95), 4.3 false
-  alarms per hour (95% CI 2.5-7.0), median 18 s after clinical onset. Preregistered before scoring.
+- Detector A, leave-one-patient-out on 14 patients: 29/33 seizures detected (95% CI 0.73-0.95) with the
+  scoring code's window (clinical onset - 30 s to min(onset + 120 s, recording end) + 60 s), median 18 s after
+  clinical onset; with the stricter onset-only window (onset - 30 s to + 60 s) 26/33 (0.62-0.89), median 13 s.
+  4.3 false alarms per hour (95% CI 2.5-7.0) either way. Preregistered before scoring.
 - The false-alarm estimate rests on only 3.7 h of non-seizure video, mostly from three patients; real monitoring
   would need many more hours. Videos start close to the seizure, which flatters recall.
 - Detector B (VSViG-base) curves are shown for comparison; the released weights saw all 14 patients, so they

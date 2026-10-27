@@ -22,3 +22,7 @@ Desktop.ini
 
 # Local wheels
 *.whl
+
+# Model files (fetched by scripts/fetch_models.py)
+models/
+demo_recordings/
