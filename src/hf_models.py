@@ -9,11 +9,13 @@ from __future__ import annotations
 import hashlib
 import os
 
-HF_REPO = "Einse57/semi-signals-detector-a"
-HF_REVISION = None  # TODO: pin to the commit hash of the first upload
+HF_REPO = "navigation07/semi-signals-detector-a"
+HF_REVISION = "6485a2f01be7dda09f2a072b1e68ca15423d8605"  # Hub commit of the v1 upload
 EXPECTED_SHA256 = {
     "detector_a_all.txt": "737fb6a103be81cc9a4984a2139b952a7e07800a07e877761539f85a6a0cb87e",
     "detector_a_all.json": "fa409d62dba5a3459d05e217dc173860e2574e85d764646d1519aed09c5a0c65",
+    "detector_a_body.txt": "d6faf006733b43a1dc443206658c7094df5e5d65cc80febe9eed1201bd821747",
+    "detector_a_body.json": "09fc4f0e1fc80451abfda9e168dd04761660c9960c596874e6b81911930add00",
 }
 DEFAULT_LOCAL = os.path.join("models", "detector_a_all.txt")
 
