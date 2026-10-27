@@ -9,8 +9,8 @@ from __future__ import annotations
 import hashlib
 import os
 
-HF_REPO = "navigation07/semi-signals-detector-a"
-HF_REVISION = "6485a2f01be7dda09f2a072b1e68ca15423d8605"  # Hub commit of the v1 upload
+HF_REPO = "Einse57/semi-signals-detector-a"
+HF_REVISION = "a52676cbb7ab8f5cd57c02cc06ed392442b477ba"  # Hub commit of the v1 upload
 EXPECTED_SHA256 = {
     "detector_a_all.txt": "737fb6a103be81cc9a4984a2139b952a7e07800a07e877761539f85a6a0cb87e",
     "detector_a_all.json": "fa409d62dba5a3459d05e217dc173860e2574e85d764646d1519aed09c5a0c65",

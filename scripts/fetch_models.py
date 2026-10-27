@@ -12,7 +12,7 @@ What it does:
    (github.com/xuyankun/VSViG, pinned commit), checks sha256, then converts to ONNX and OpenVINO IR
    with `src/export_vsvig.py` only if the IR is missing or was built from different weights.
    Conversion needs torch (CPU build is enough); the demo itself does not.
-3. Detector A: downloads from the Hugging Face repo `navigation07/semi-signals-detector-a` with the pinned
+3. Detector A: downloads from the Hugging Face repo `Einse57/semi-signals-detector-a` with the pinned
    SHA-256s in `src/hf_models.py`,
    or copies a local model given with `--detector-a PATH` (its `.json` sidecar is taken from next to it).
 
