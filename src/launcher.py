@@ -66,16 +66,26 @@ def sample_clips(data_dir: Path) -> list[Path]:
     """data/pat*/*.mp4 as fetched by scripts/fetch_models.py (rendered outputs skipped)."""
     if not data_dir.is_dir():
         return []
-    return sorted(p for p in data_dir.glob("pat*/*.mp4") if not p.name.endswith(SKIP_SUFFIXES))
+    return sorted(p for p in data_dir.glob("**/pat*/*.mp4") if not p.name.endswith(SKIP_SUFFIXES))
+
+
+def find_labels(video: Path | None, data_dir: Path) -> Path | None:
+    """A Label.xlsx next to the video or up to three folders above it, else in data/ or one folder below."""
+    cands = []
+    if video:
+        cands += [d / "Label.xlsx" for d in list(Path(video).parents)[:4]]
+    cands += [data_dir / "Label.xlsx"] + (sorted(data_dir.glob("*/Label.xlsx")) if data_dir.is_dir() else [])
+    return next((c for c in cands if c.is_file()), None)
 
 
 def is_dataset_clip(video: Path, data_dir: Path) -> bool:
-    """Label.xlsx only describes the sample dataset: data/patNN/<seizure>.mp4."""
+    """Label.xlsx only describes the sample dataset: data/patNN/<seizure>.mp4, also when the clips sit
+    one or more folders deeper, e.g. data/dataset/patNN/<seizure>.mp4 from a manual download."""
     try:
         rel = video.resolve().relative_to(data_dir.resolve())
     except ValueError:
         return False
-    return len(rel.parts) == 2 and rel.parts[0].lower().startswith("pat")
+    return len(rel.parts) >= 2 and rel.parts[-2].lower().startswith("pat")
 
 
 def models_status(models_dir: Path, data_dir: Path) -> str:
@@ -103,8 +113,10 @@ def viewer_cmd(s: dict, data_dir: Path, models_dir: Path, extra: list[str] = ())
            "--device", s.get("device", "auto").lower(),
            "--detector-a", str(models_dir / "detector_a_all.txt"),
            "--vsvig", str(models_dir / "vsvig_base.xml") if s.get("vsvig") else ""]
-    lab = s.get("labels", "")
-    if lab and Path(lab).exists() and is_dataset_clip(v, data_dir):
+    # markers are drawn only for clips listed in the labels file (patNN folder + SzN file name);
+    # the viewer ignores the file for any other video, so it is always safe to pass
+    lab = s.get("labels", "") or str(find_labels(v, data_dir) or "")
+    if lab and Path(lab).is_file():
         cmd += ["--labels", lab]
     if s.get("loop"):
         cmd.append("--loop")
@@ -218,11 +230,11 @@ class Launcher:
 
         # labels
         ttk.Label(m, text="Labels (optional)").grid(row=4, column=0, sticky="w", **pad)
-        lab_default = str(data_dir / "Label.xlsx") if (data_dir / "Label.xlsx").exists() else ""
+        lab_default = str(find_labels(None, data_dir) or "")
         self.labels = tk.StringVar(value=st.get("labels") or lab_default)
         ttk.Entry(m, textvariable=self.labels).grid(row=4, column=1, sticky="ew", **pad)
         ttk.Button(m, text="Browse...", command=self.browse_labels).grid(row=4, column=2, sticky="ew", **pad)
-        ttk.Label(m, text="Label.xlsx onset markers are drawn only for the sample dataset clips.",
+        ttk.Label(m, text="Onset markers show for clips listed in it (patNN folder, SzN file); found automatically if left empty.",
                   foreground="#666").grid(row=5, column=1, sticky="w", padx=8)
 
         # options
@@ -312,8 +324,10 @@ class Launcher:
         self.video_box["values"] = [str(c) for c in clips]
         if not self.video.get() and clips:
             self.video.set(str(clips[0]))
-        if not self.labels.get() and (self.data_dir / "Label.xlsx").exists():
-            self.labels.set(str(self.data_dir / "Label.xlsx"))
+        if not self.labels.get():
+            f = find_labels(Path(self.video.get()) if self.video.get() else None, self.data_dir)
+            if f:
+                self.labels.set(str(f))
         if not self.consent.get() and self.video.get():
             self.consent.set(CONSENT["public" if is_dataset_clip(Path(self.video.get()), self.data_dir) else "self"])
         has_vsvig = (self.models_dir / "vsvig_base.xml").exists()
@@ -348,6 +362,10 @@ class Launcher:
         v = self.video.get().strip()
         if v:
             self.consent.set(CONSENT["public" if is_dataset_clip(Path(v), self.data_dir) else "self"])
+            if not self.labels.get().strip():
+                f = find_labels(Path(v), self.data_dir)
+                if f:
+                    self.labels.set(str(f))
 
     def browse_labels(self):
         from tkinter import filedialog

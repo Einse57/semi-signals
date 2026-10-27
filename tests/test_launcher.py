@@ -16,6 +16,7 @@ def test_sample_clips_and_dataset_check(tmp_path):
     d = _data(tmp_path)
     assert [p.name for p in L.sample_clips(d)] == ["Sz1P.mp4", "Sz2P.mp4"]
     assert L.is_dataset_clip(d / "pat10" / "Sz1P.mp4", d)
+    assert L.is_dataset_clip(d / "dataset" / "pat10" / "Sz2P.mp4", d)
     assert not L.is_dataset_clip(d / "other.mp4", d)
     assert not L.is_dataset_clip(tmp_path / "mine.mp4", d)
     assert L.sample_clips(tmp_path / "nope") == []
@@ -31,7 +32,8 @@ def test_commands_parse_in_the_tools(tmp_path):
     a = run_seizure_demo.parse_args(v[4:])
     assert a.loop and a.no_hands and a.device == "gpu" and a.labels and a.vsvig == "" and a.max_loops == 2
     own = dict(s, video=str(d / "other.mp4"))
-    assert run_seizure_demo.parse_args(L.viewer_cmd(own, d, m)[4:]).labels is None     # labels only for dataset clips
+    a_own = run_seizure_demo.parse_args(L.viewer_cmd(own, d, m)[4:])
+    assert run_seizure_demo.label_for_video(a_own.labels, a_own.input) is None    # no markers for unlisted videos
     r = review_video.parse_args(L.annotate_cmd(s, d, m)[4:])
     assert r.annotator == "AL" and r.pat_id == "p10" and r.consent == "public" and r.headless_process
     assert review_video.parse_args(L.annotate_cmd(own, d, m)[4:]).consent == "self"
@@ -55,3 +57,20 @@ def test_progress_lines_and_status(tmp_path):
     assert L.parse_progress("[review] saved") is None
     st = L.models_status(tmp_path / "models", _data(tmp_path))
     assert "Detector A missing" in st and "2 clip(s)" in st and "Label.xlsx ok" in st
+
+
+def test_labels_found_and_passed_anywhere(tmp_path):
+    import src.launcher as L
+    d = tmp_path / "data"
+    clip = tmp_path / "elsewhere" / "dataset" / "pat10" / "Sz2P.mp4"
+    clip.parent.mkdir(parents=True)
+    clip.touch()
+    lab = tmp_path / "elsewhere" / "dataset" / "Label.xlsx"
+    lab.touch()
+    assert L.find_labels(clip, d) == lab
+    cmd = L.viewer_cmd({"video": str(clip)}, d, tmp_path / "models")
+    assert cmd[cmd.index("--labels") + 1] == str(lab)
+    other = tmp_path / "a" / "b" / "c" / "d" / "mine.mp4"
+    cmd = L.viewer_cmd({"video": str(other), "labels": str(lab)}, d, tmp_path / "models")
+    assert "--labels" in cmd          # viewer ignores it for unlisted videos
+    assert L.find_labels(other, d) is None
