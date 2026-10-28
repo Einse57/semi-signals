@@ -26,8 +26,10 @@ def _clip(tmp_path, seconds=12, fps=10):
             p = 0.97 if 4 <= t <= 7 else 0.1
             f.write(",".join([str(t), f"{p}", f"{p}", str(int(p > 0.95)), "right hand speed=0.20|", "0.3"]
                              + ["0.1"] * len(A.REGIONS)) + "\n")
+    R.write_stamp(R.parse_args(["--detector-a", "none.txt"]), video)    # made with the settings the tests use
     later = time.time() + 5
-    os.utime(rendered, (later, later)); os.utime(scores, (later, later))   # newer than the video: no reprocessing
+    for p in (rendered, scores, R.stamp_path(video)):                  # newer than the video: no reprocessing
+        os.utime(p, (later, later))
     return video
 
 
@@ -90,3 +92,30 @@ def test_seizure_type_pick_list_without_tk(monkeypatch):
     monkeypatch.setattr(R, "_tty", lambda: False)
     assert R.ask_choice("t", "p", list(A.SEIZURE_TYPES)) is None      # no terminal prompt when launched from the GUI
     assert R.ask("t", "p", "AL") == "AL"
+
+
+def test_stale_render_is_redone(tmp_path):
+    """A render made with other settings or an older overlay version is not reused."""
+    video = _clip(tmp_path)
+    a = R.parse_args(["--detector-a", "none.txt"])
+    assert R.render_is_fresh(a, video)
+    assert not R.render_is_fresh(R.parse_args(["--detector-a", "none.txt", "--vsvig", "m.xml"]), video)
+    assert not R.render_is_fresh(R.parse_args(["--detector-a", "none.txt", "--no-hands"]), video)
+    R.stamp_path(video).write_text('{"render_version": 1}')
+    later = time.time() + 6
+    os.utime(R.stamp_path(video), (later, later))
+    assert not R.render_is_fresh(a, video)
+    R.stamp_path(video).unlink()                      # renders from before the stamp existed
+    assert not R.render_is_fresh(a, video)
+
+
+def test_display_width_fits_screen():
+    class P:
+        def width(self): return 420
+        def screen_width(self): return 1920
+        def screen_height(self): return 1080
+    rw, rh = 1600, 540
+    w = R.display_width(rw, rh, P(), area=(1920, 1032))      # 1920x1080 at 150 %, DPI aware, taskbar
+    assert w + 420 + 24 <= 1920 and w <= rw
+    assert rh * w / rw + R.BAR_H + 2 * R.LEGEND_H <= 1032
+    assert R.display_width(rw, rh, P(), area=(3840, 2100)) == rw   # never upscaled

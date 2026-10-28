@@ -41,6 +41,9 @@ Keys (also shown in a footer strip in each window; `h` hides or shows it):
 - **Detector A** (pose features + LightGBM, trained here): score every second, alert when the
   5 s smoothed score stays at or above its threshold (0.95) for 3 s.
 - **Detector B** (VSViG-base, Apache-2.0 weights, OpenVINO IR): score every 0.5 s on the last 5 s.
+  It is scored only when the tracked patient is in at least half of that window; otherwise the readout
+  shows "-- (no subject tracked)" and the line has a gap (with no person, VSViG's inputs are all zeros and
+  it returns about 0, which is not a meaningful score).
 - Markers for the EEG onset and clinical onset from `Label.xlsx`.
 - **Side panel** (all lanes share one time axis):
   - probability strip: Detector A raw and 5 s smoothed score (0-1), dashed alarm threshold (0.95),
@@ -51,8 +54,8 @@ Keys (also shown in a footer strip in each window; `h` hides or shows it):
     window as the score. The top 2-3 positive groups are listed (with a little hysteresis so they do not
     flicker) once the smoothed score reaches 0.5. When a driver's features are mostly missing, it is labelled
     "<region> not tracked (pose lost)": the model treats lost tracking as evidence, and the caption says so;
-  - motion graphs (hands, arms, head, legs, whole body; speed in body sizes per second): driver regions get a
-    thick amber line and an amber background; the same joints are ringed on the video;
+  - motion graphs (hands, arms, head, legs, whole body; speed in body sizes per second), drawn plain; the
+    joints of the driver regions are ringed in amber on the video;
   - an EEG lane, greyed out: a layout hook (`explain_view.draw_eeg_lane`) for a future paired EEG stream.
   - Caption on screen: "Drivers explain the model score, not clinical cause. Research use only, not diagnostic."
   - Left/right are the patient's left/right (COCO keypoints), not the viewer's.
@@ -62,6 +65,12 @@ Keys (also shown in a footer strip in each window; `h` hides or shows it):
   all causal state (buffers, smoothing, alarms, explanations, graphs), so the scores repeat exactly.
 - Explanation cost: about 1 ms per second of video on CPU (`pred_contrib` once per second), and the
   panel is redrawn only when new samples arrive. Use `--no-explain` to turn it off, `--timing` for measurements.
+- Text is drawn anti-aliased with a TrueType font (`src/textdraw.py`: Segoe UI on Windows, DejaVu Sans on
+  Linux; set `SEMISIGNALS_FONT` / `SEMISIGNALS_FONT_BOLD` to a `.ttf` to override). Without Pillow or a
+  TrueType font it falls back to OpenCV's Hershey font; `start.cmd` installs Pillow into an existing `.venv`
+  if it is missing. On Windows the viewer, the review window and the launcher declare themselves DPI aware,
+  so display scaling does not bitmap-upscale (blur) them; the windows show the frame 1:1 and shrink it
+  (INTER_AREA) only when it is larger than the screen work area.
 
 ## Review your own video (basic, local only)
 Start it from the launcher (**Annotate this video**), or from a terminal:
@@ -71,7 +80,10 @@ python -m src.review_video --input my_clip.mp4 --annotator AL --pat-id self01
 ```
 Missing details are asked for in dialogs, not in the terminal.
 1. Processes the chosen file once (pose + Detector A + drivers; about real time) and saves
-   `<stem>_semisignals.mp4` and `<stem>_scores.csv` next to it.
+   `<stem>_semisignals.mp4`, `<stem>_scores.csv` and `<stem>_semisignals.json` (the settings and overlay
+   version the render was made with) next to it. The render is reused only when it is newer than the video
+   and matches the current settings (VSViG on/off, hands, Detector A model) and overlay version; otherwise
+   it is made again. `--reprocess` forces it.
 2. Plays the rendered video back in sync, with a timeline bar (red: model alarms, green: your marks).
    Keys: `space` pause, `j`/`l` back/forward 5 s, `o` clinical onset (new event), `e` clinical end,
    `g` EEG onset, `t` seizure type (pick list of ILAE 2017 types, or type your own),
@@ -82,7 +94,8 @@ Missing details are asked for in dialogs, not in the terminal.
    and **Open in ELAN** (ELAN from its usual Windows install folder, else whatever opens `.eaf` files).
    Autosave: every change is written straight away (to a temporary file, then swapped in, so a crash never
    leaves a half-written `.eaf`); the status shows `saved hh:mm:ss`. Quitting needs no save prompt.
-   At the end of the video the window stays on the last frame: `r` replay, `q` quit.
+   At the end of the video the window stays on the last frame under an "End of video" banner (amber
+   outline across the middle): `r` replay, `q` quit; the annotation keys still work.
 3. Saves next to the original video (format code isolated in `src/annotation.py`):
    - `<stem>.eaf`: ELAN EAF 3.0 (ms). Tiers `Seizure` (onset-to-end, value from the `seizure_event` CV)
      with child `ILAE2017_type`, `EEG_onset` (empty for now), `Notes`, `Exclude`, and the model tiers
