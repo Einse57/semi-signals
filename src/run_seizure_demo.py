@@ -13,7 +13,7 @@ fused with noisy-OR. Such replays are UNPAIRED (different patients) unless state
 Layout: video on the left; on the right a panel with the smoothed Detector A probability
 (dashed alarm threshold, shaded alarm seconds, current value), the top drivers of the score
 (LightGBM pred_contrib once per second, grouped by body region and feature family, averaged
-over 5 s), per-region motion graphs with the driver regions highlighted, and a greyed-out
+over 5 s), plain per-region motion graphs, and a greyed-out
 EEG lane reserved for a future paired EEG stream.
 
 Keys: q quit, space pause, f fast-forward toggle (no real-time pacing), r replay from the start,
@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import functools
 import json
 import os
 import time
@@ -33,9 +34,13 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from src.textdraw import put_text, put_block, text_width, make_dpi_aware, fit_to_screen
+
 WIN_S = 12.0          # seconds of keypoint history kept for features
 CHART_S = 90.0        # seconds shown on the chart
 WIN_NAME = "semi-signals | seizure detection"
+MIN_VALID_B = 0.5    # Detector B needs the tracked subject in at least half of its 5 s window, else no score
+RENDER_VERSION = 2   # bump when the rendered overlay changes, so saved renders are redone (review_video)
 
 
 def parse_args(argv=None):
@@ -242,24 +247,31 @@ _legend = {"on": True}
 
 
 def draw_legend(w, items, h=LEGEND_H, note=None):
-    """Footer strip with the key commands (below the video and graphs, never over them)."""
+    """Footer strip with the key commands (below the video and graphs, never over them). Cached."""
+    return _legend_img(int(w), tuple(tuple(i) for i in items), int(h), note)
+
+
+@functools.lru_cache(maxsize=32)
+def _legend_img(w, items, h, note):
     img = np.full((h, w, 3), 32, np.uint8)
     cv2.line(img, (0, 0), (w - 1, 0), (80, 80, 80), 1)
-    x, y = 12, h // 2 + 6
+    x, y = 12, h // 2
     for key, what in items:
-        (kw, _), _ = cv2.getTextSize(key, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
-        cv2.rectangle(img, (x - 5, y - 17), (x + kw + 5, y + 6), (90, 90, 90), -1)
-        cv2.putText(img, key, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2, cv2.LINE_AA)
-        x += kw + 12
-        (dw, _), _ = cv2.getTextSize(what, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-        if x + dw > w - 10:
+        kw = text_width(key, 14, True) if key else 0
+        dw = text_width(what, 14)
+        if x + kw + 12 + dw > w - 10:
             break
-        cv2.putText(img, what, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (210, 210, 210), 1, cv2.LINE_AA)
+        if key:
+            cv2.rectangle(img, (x - 6, y - 11), (x + kw + 6, y + 11), (90, 90, 90), -1)
+            put_text(img, key, (x, y), 14, (255, 255, 255), bold=True, anchor="lm")
+            x += kw + 14
+        put_text(img, what, (x, y), 14, (210, 210, 210), anchor="lm")
         x += dw + 22
     if note:
-        (nw, _), _ = cv2.getTextSize(note, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+        nw = text_width(note, 14, True)
         if x + nw < w - 10:
-            cv2.putText(img, note, (w - nw - 12, y), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 190, 255), 1, cv2.LINE_AA)
+            put_text(img, note, (w - 12, y), 14, (0, 190, 255), bold=True, anchor="rm")
+    img.setflags(write=False)
     return img
 
 
@@ -273,16 +285,24 @@ def draw_end_overlay(img, text=END_TEXT, sub=None):
     """Banner across the frozen last frame (graphs and score strip stay visible)."""
     out = img.copy()
     h, w = out.shape[:2]
-    y0, y1 = h // 2 - 42, h // 2 + (42 if sub else 30)
+    y0, y1 = h // 2 - 34, h // 2 + (40 if sub else 30)
     band = out[y0:y1].copy(); band[:] = (20, 20, 20)
-    out[y0:y1] = cv2.addWeighted(out[y0:y1], 0.25, band, 0.75, 0)
+    out[y0:y1] = cv2.addWeighted(out[y0:y1], 0.2, band, 0.8, 0)
     cv2.rectangle(out, (0, y0), (w - 1, y1), (0, 190, 255), 2)
-    (tw, _), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 1.0, 2)
-    cv2.putText(out, text, ((w - tw) // 2, h // 2 + 6), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2, cv2.LINE_AA)
+    put_text(out, text, (w // 2, h // 2 - 4 if sub else h // 2), 26, (255, 255, 255), bold=True, anchor="mm")
     if sub:
-        (sw, _), _ = cv2.getTextSize(sub, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)
-        cv2.putText(out, sub, ((w - sw) // 2, h // 2 + 32), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 190, 255), 1, cv2.LINE_AA)
+        put_text(out, sub, (w // 2, h // 2 + 22), 15, (0, 190, 255), anchor="mm")
     return out
+
+
+def show(img):
+    """imshow at 1:1, shrunk (INTER_AREA) only if the frame is larger than the screen work area."""
+    cv2.imshow(WIN_NAME, fit_to_screen(img))
+
+
+def overlay_lines(img, lines, org, size_px, bold=True):
+    """Text lines on a translucent dark box (readable on any video); lines = [(text, bgr), ...]."""
+    put_block(img, lines, org, size_px, bold=bold)
 
 
 def pick_video(initial_dir=None):
@@ -316,6 +336,8 @@ def window_closed() -> bool:
 
 def main(argv=None):
     a = parse_args(argv)
+    if not a.headless:
+        make_dpi_aware()                 # crisp text on scaled Windows displays (before any window)
     from src.hf_models import resolve_detector_a
     a.detector_a = resolve_detector_a(a.detector_a)
     from src import config  # applies the OpenVINO iGPU patch for rtmlib
@@ -395,7 +417,7 @@ def end_screen(last, video):
     """Freeze on the last frame with the overlay; returns ('replay'|'quit'|'open', path)."""
     sub = None
     while True:
-        cv2.imshow(WIN_NAME, with_legend(draw_end_overlay(last, sub=sub)))
+        show(with_legend(draw_end_overlay(last, sub=sub)))
         k = cv2.waitKey(50) & 0xFF
         if window_closed():
             return "quit", None
@@ -443,9 +465,7 @@ def run_pass(a, M, video, labels, n_pass):
     if a.save and n_pass == 1:
         writer = cv2.VideoWriter(a.save, cv2.VideoWriter_fourcc(*"mp4v"), src_fps, (disp_w + pan_w, out_h))
     if not a.headless:
-        cv2.namedWindow(WIN_NAME, cv2.WINDOW_NORMAL)
-        if n_pass == 1:
-            cv2.resizeWindow(WIN_NAME, disp_w + pan_w, out_h + (LEGEND_H if _legend["on"] else 0))
+        cv2.namedWindow(WIN_NAME, cv2.WINDOW_AUTOSIZE)   # 1:1 pixels; show() shrinks to the screen if needed
         cv2.setWindowTitle(WIN_NAME, f"semi-signals | {Path(video).name}")
 
     tm = collections.defaultdict(float); tn = collections.defaultdict(int)
@@ -478,7 +498,7 @@ def run_pass(a, M, video, labels, n_pass):
             k = cv2.waitKey(30) & 0xFF
             if k == ord("h") and out is not None:
                 _legend["on"] = not _legend["on"]
-                cv2.imshow(WIN_NAME, with_legend(out, note="paused"))
+                show(with_legend(out, note="paused"))
             if k == ord(" "):
                 paused = False; wall0 = time.perf_counter(); vid0 = t
             elif k == ord("q") or window_closed():
@@ -529,7 +549,9 @@ def run_pass(a, M, video, labels, n_pass):
                 sc.last_b = t
                 P = np.ascontiguousarray(np.stack(list(sc.buf["patches"])[-30:]).transpose(0, 1, 4, 2, 3)[None], np.float32)
                 K = np.ascontiguousarray(np.stack(list(sc.buf["vkp"])[-30:])[None], np.float32)
-                hist["tB"].append(t); hist["pB"].append(vs(P, K))
+                valid = float(np.mean(np.asarray(list(sc.buf["sel"])[-30:]) >= 0))
+                # with no tracked subject the inputs are all zeros and VSViG returns ~0: show no score instead
+                hist["tB"].append(t); hist["pB"].append(vs(P, K) if valid >= MIN_VALID_B else np.nan)
             inf_times.append(time.perf_counter() - t_inf)
             n_samples += 1; new_data = True
         # Detector A once per completed second
@@ -556,17 +578,21 @@ def run_pass(a, M, video, labels, n_pass):
                     if sel_sc[j_] >= 0.3:
                         cv2.circle(vis, tuple(int(v) for v in sel_kp[j_] * sx), 11, ev.HILITE, 2, cv2.LINE_AA)
         alarm_a = bool(hist["alA"] and hist["alA"][-1])
-        alarm_b = len(hist["pB"]) >= 6 and np.mean(hist["pB"][-6:]) >= 0.5
-        txt = f"Detector A (pose features): {np.nan_to_num(hist['pAs'][-1]) if hist['pAs'] else 0:.2f}"
-        cv2.putText(vis, txt, (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255) if alarm_a else (0, 255, 0), 2)
+        pB6 = np.asarray(hist["pB"][-6:], float)
+        alarm_b = len(pB6) >= 6 and np.isfinite(pB6).sum() >= 4 and np.nanmean(pB6) >= 0.5
+        lines = [(f"Detector A (pose features): {np.nan_to_num(hist['pAs'][-1]) if hist['pAs'] else 0:.2f}",
+                  (60, 60, 255) if alarm_a else (0, 255, 0))]
         if vs is not None:
-            txt = f"Detector B (VSViG-base, reference): {hist['pB'][-1] if hist['pB'] else 0:.2f}"
-            cv2.putText(vis, txt, (15, 58), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255) if alarm_b else (255, 200, 0), 2)
+            pb_ = hist["pB"][-1] if hist["pB"] else np.nan
+            lines.append((f"Detector B (VSViG-base, reference): " + (f"{pb_:.2f}" if np.isfinite(pb_) else
+                          ("-- (no subject tracked)" if hist["pB"] else "-- (warming up, 5 s)")),
+                          (60, 60, 255) if alarm_b else (255, 200, 0)))
+        overlay_lines(vis, lines, (12, 10), 20)
         if alarm_a or alarm_b:
-            cv2.putText(vis, "SEIZURE ALERT", (disp_w - 250, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 3)
+            put_text(vis, "SEIZURE ALERT", (disp_w - 16, 14), 28, (0, 0, 255), bold=True, anchor="rt")
         if inf_times:
-            cv2.putText(vis, f"analysis {1.0 / max(1e-3, np.mean(inf_times)):.0f} frames/s ({device})", (15, disp_h - 15),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+            overlay_lines(vis, [(f"analysis {1.0 / max(1e-3, np.mean(inf_times)):.0f} frames/s ({device})", (210, 210, 210))],
+                          (12, disp_h - 30), 14, bold=False)
         if panel is None or new_data:          # the panel only changes when new samples arrive
             extra = []
             if vs is not None:
@@ -594,7 +620,7 @@ def run_pass(a, M, video, labels, n_pass):
         if writer is not None:
             writer.write(out)
         if not a.headless:
-            cv2.imshow(WIN_NAME, with_legend(out, note="fast" if fast else None))
+            show(with_legend(out, note="fast" if fast else None))
             if not fast:
                 lag = (t - vid0) - (time.perf_counter() - wall0)
                 wait = max(1, int(lag * 1000))
@@ -605,7 +631,7 @@ def run_pass(a, M, video, labels, n_pass):
                 action = "quit"; break
             if k == ord(" "):
                 paused = True
-                cv2.imshow(WIN_NAME, with_legend(out, note="paused"))
+                show(with_legend(out, note="paused"))
             if k == ord("h"):
                 _legend["on"] = not _legend["on"]
             if k == ord("f"):

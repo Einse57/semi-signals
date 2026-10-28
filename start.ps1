@@ -85,5 +85,13 @@ if ($LASTEXITCODE -ne 0) {
     Exit-WithPause 1
 }
 
+# Pillow draws the on-screen text (added after some .venv folders were made); without it the text is plainer
+& $Py -c 'import PIL' 2>$null
+if ($LASTEXITCODE -ne 0) {
+    Write-Host '==> install Pillow (sharper on-screen text)' -ForegroundColor Cyan
+    & $Py -m pip install 'pillow>=9.2'
+    if ($LASTEXITCODE -ne 0) { Write-Host 'Pillow could not be installed (proxy?); the viewer uses the OpenCV font instead.' -ForegroundColor Yellow }
+}
+
 & $Py -m src.launcher @args
 Exit-WithPause $LASTEXITCODE

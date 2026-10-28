@@ -9,3 +9,4 @@ huggingface_hub>=0.23  # optional: fetch Detector A from the Hub
 scipy>=1.11
 pandas>=2.0
 openpyxl>=3.1
+pillow>=9.2   # anti-aliased TrueType text (src/textdraw.py); falls back to the OpenCV font without it

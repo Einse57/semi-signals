@@ -1,6 +1,6 @@
 """Side panel for the seizure demo: probability strip, top drivers, motion graphs, EEG lane.
 
-All lanes share one time axis (same left/right margins), so a highlighted motion line
+All lanes share one time axis (same left/right margins), so a motion line
 lines up with the probability above it.
 """
 from __future__ import annotations
@@ -9,8 +9,9 @@ import numpy as np
 import cv2
 
 from src.config import REGION_COLORS
+from src.textdraw import put_text, put_block, text_width, fit_text
 
-FONT = cv2.FONT_HERSHEY_SIMPLEX
+FS, FS_TITLE = 13, 14              # text sizes (px); 13 px is the smallest label
 L_M, R_M = 44, 86                 # shared plot margins (px)
 HILITE = (0, 190, 255)            # amber (BGR)
 GRID = (55, 55, 55)
@@ -31,6 +32,11 @@ class Axis:
 
     def x(self, t):
         return int(L_M + (t - self.t0) / self.span * self.pw)
+
+
+def _light(col, k=0.45):
+    """Lighter version of a line colour for text (dark blues are unreadable on the dark panel)."""
+    return tuple(int(c + (255 - c) * k) for c in col)
 
 
 def dashed_hline(img, x0, x1, y, col, dash=8, gap=6):
@@ -64,14 +70,14 @@ def draw_marks(img, ax, top, bot, marks, label=True):
         if tm is not None and ax.t0 <= tm <= ax.now:
             cv2.line(img, (ax.x(tm), top), (ax.x(tm), bot), col, 1)
             if label:
-                cv2.putText(img, name, (ax.x(tm) + 3, top + 11), FONT, 0.36, col, 1)
+                put_block(img, [(name, col)], (ax.x(tm) + 2, top + 1), FS, bold=False, pad=3, gap=0, dim=0.3)
 
 
 def draw_prob_strip(w, h, now, span, tA, pA, pAs, alarm, thr, marks, extra=(), alarm_now=False):
     """tA/pA/pAs/alarm: per-second history (alarm = bool per second, covering [t-1, t))."""
     img = np.full((h, w, 3), 22, np.uint8)
     ax = Axis(w, now, span)
-    T, B = 18, 16
+    T, B = 24, 20
     ph = h - T - B
     Y = lambda v: int(T + (1 - min(max(v, 0.0), 1.0)) * ph)
     # alarm shading
@@ -81,28 +87,30 @@ def draw_prob_strip(w, h, now, span, tA, pA, pAs, alarm, thr, marks, extra=(), a
             img[T:T + ph, x0:x1 + 1] = (img[T:T + ph, x0:x1 + 1] * 0.5 + np.array((20, 20, 150)) * 0.5).astype(np.uint8)
     for v in (0.0, 0.5, 1.0):
         cv2.line(img, (L_M, Y(v)), (w - R_M, Y(v)), GRID, 1)
-        cv2.putText(img, f"{v:.1f}", (8, Y(v) + 4), FONT, 0.38, TXT, 1)
+        put_text(img, f"{v:.1f}", (L_M - 6, Y(v)), FS, TXT, anchor="rm")
     if thr is not None:
         dashed_hline(img, L_M, w - R_M, Y(thr), (80, 80, 255))
-        cv2.putText(img, f"alarm {thr:.2f}", (w - R_M + 4, Y(thr) + 4), FONT, 0.36, (80, 80, 255), 1)
+        put_text(img, f"alarm {thr:.2f}", (w - R_M + 4, Y(thr)), FS, (80, 80, 255), anchor="lm")
     draw_marks(img, ax, T, T + ph, marks)
     for name, col, ts, vs in extra:
         _polyline(img, ax, Y, ts, vs, col, 1)
     _polyline(img, ax, Y, tA, pA, (0, 110, 0), 1)
     _polyline(img, ax, Y, tA, pAs, (0, 255, 0), 2)
-    cv2.putText(img, "Seizure probability (Detector A, 5 s smoothed)", (6, 13), FONT, 0.42, (230, 230, 230), 1)
+    put_text(img, "Seizure probability (Detector A, 5 s smoothed)", (6, 4), FS_TITLE, (230, 230, 230), bold=True, anchor="lt")
     lx = L_M
     for name, col in [("raw", (0, 110, 0)), ("smoothed", (0, 255, 0))] + [(n, c) for n, c, _, _ in extra]:
-        cv2.putText(img, name, (lx, h - 4), FONT, 0.36, col, 1)
-        lx += 12 + 7 * len(name)
+        if lx + text_width(name, FS) > w - R_M:
+            break
+        cv2.line(img, (lx, h - 9), (lx + 12, h - 9), col, 2)
+        lx = put_text(img, name, (lx + 16, h - 9), FS, col, anchor="lm") + 14
     # current value readout
     cur = next((v for v in reversed(pAs) if np.isfinite(v)), np.nan)
     col = (60, 60, 255) if alarm_now else (0, 255, 0)
-    cv2.putText(img, "now", (w - R_M + 6, T + 34), FONT, 0.4, TXT, 1)
-    cv2.putText(img, "--" if not np.isfinite(cur) else f"{cur:.2f}", (w - R_M + 6, T + 64), FONT, 0.85, col, 2)
+    put_text(img, "now", (w - R_M + 6, T + 22), FS, TXT)
+    put_text(img, "--" if not np.isfinite(cur) else f"{cur:.2f}", (w - R_M + 6, T + 54), 28, col, bold=True)
     if alarm_now:
-        cv2.putText(img, "ALARM", (w - R_M + 6, T + 88), FONT, 0.55, (60, 60, 255), 2)
-    cv2.putText(img, f"t={now:.0f}s", (w - R_M + 6, h - 4), FONT, 0.38, TXT, 1)
+        put_text(img, "ALARM", (w - R_M + 6, T + 78), 16, (60, 60, 255), bold=True)
+    put_text(img, f"t = {now:.0f} s", (w - R_M + 6, h - 9), FS, TXT, anchor="lm")
     if alarm_now:
         cv2.rectangle(img, (0, 0), (w - 1, h - 1), (0, 0, 255), 2)
     return img
@@ -110,19 +118,19 @@ def draw_prob_strip(w, h, now, span, tA, pA, pAs, alarm, thr, marks, extra=(), a
 
 def draw_drivers(w, h, drivers, p_smooth, min_p=0.5):
     img = np.full((h, w, 3), 30, np.uint8)
-    cv2.putText(img, "Top drivers of the score (last 5 s)", (6, 15), FONT, 0.45, (230, 230, 230), 1)
+    put_text(img, "Top drivers of the score (last 5 s)", (6, 4), FS_TITLE, (230, 230, 230), bold=True, anchor="lt")
     if not drivers:
         msg = (f"shown when the smoothed score is >= {min_p:.2f}" if not np.isfinite(p_smooth) or p_smooth < min_p
                else "no clear positive drivers")
-        cv2.putText(img, msg, (14, 38), FONT, 0.42, (130, 130, 130), 1)
-    y = 36
+        put_text(img, msg, (14, 40), FS, (140, 140, 140))
+    y = 38
     for d in drivers[:3]:
         bw = int(110 * d["share"])
         cv2.rectangle(img, (12, y - 10), (12 + bw, y + 2), HILITE, -1)
         cv2.rectangle(img, (12, y - 10), (122, y + 2), (90, 90, 90), 1)
-        cv2.putText(img, d["text"], (132, y), FONT, 0.5, HILITE, 1, cv2.LINE_AA)
-        y += 19
-    cv2.putText(img, DISCLAIMER, (6, h - 6), FONT, 0.36, (150, 150, 150), 1, cv2.LINE_AA)
+        put_text(img, fit_text(d["text"], w - 140, 14), (132, y), 14, HILITE)
+        y += 18
+    put_text(img, fit_text(DISCLAIMER, w - 12, FS), (6, h - 5), FS, (150, 150, 150))
     return img
 
 
@@ -153,20 +161,20 @@ def draw_motion(w, h, now, span, t, regions, highlight, marks, floor=0.15):
                 _polyline(img, ax, Y, tt, v, REGION_COLORS.get(r, TXT), 2)
             else:
                 _polyline(img, ax, Y, tt, v, tuple(int(c * 0.6) for c in REGION_COLORS.get(r, TXT)), 1)
-        cv2.putText(img, title, (4, 13), FONT, 0.38, HILITE if hl else TXT, 1)
-        ly = 13
+        put_text(img, title, (4, 2), FS, HILITE if hl else TXT, bold=hl, anchor="lt")
+        ly = 9
         for r in keys:
-            col = HILITE if r in highlight else REGION_COLORS.get(r, TXT)
-            cv2.line(img, (w - R_M + 4, ly - 4), (w - R_M + 14, ly - 4), REGION_COLORS.get(r, TXT), 2)
-            cv2.putText(img, SHORT[r] + (" *" if r in highlight else ""), (w - R_M + 18, ly), FONT, 0.36, col, 1)
-            ly += 13
+            col = HILITE if r in highlight else _light(REGION_COLORS.get(r, TXT))
+            cv2.line(img, (w - R_M + 4, ly), (w - R_M + 14, ly), REGION_COLORS.get(r, TXT), 2)
+            put_text(img, SHORT[r] + (" *" if r in highlight else ""), (w - R_M + 18, ly), FS, col, anchor="lm")
+            ly += 16
         cv2.line(img, (0, per - 1), (w, per - 1), GRID, 1)
         strips.append(img)
     out = np.vstack(strips)
     if out.shape[0] < h:
         out = np.vstack([out, np.full((h - out.shape[0], w, 3), 14, np.uint8)])
     hdr = "Motion (speed, body-size/s" + ("; * = top driver)" if highlight else ")")
-    cv2.putText(out, hdr, (L_M + 60, 13), FONT, 0.34, (120, 120, 120), 1)
+    put_text(out, hdr, (w - R_M - 6, 2), FS, (130, 130, 130), anchor="rt")
     return out
 
 
@@ -176,12 +184,12 @@ def draw_eeg_lane(w, h, enabled=False, ts=None, vs=None, now=0.0, span=90.0):
     if not enabled:
         for x in range(-h, w, 12):                       # hatch = not connected
             cv2.line(img, (x, h), (x + h, 0), (34, 34, 34), 1)
-        cv2.putText(img, "EEG lane: not connected (planned)", (L_M, h // 2 + 5), FONT, 0.42, (95, 95, 95), 1)
+        put_text(img, "EEG lane: not connected (planned)", (L_M, h // 2), FS, (110, 110, 110), anchor="lm")
         return img
     ax = Axis(w, now, span)
     Y = lambda v: int(2 + (1 - min(max(v, 0.0), 1.0)) * (h - 4))
     _polyline(img, ax, Y, ts, vs, (255, 0, 255), 1)
-    cv2.putText(img, "EEG", (4, h // 2 + 5), FONT, 0.42, (255, 0, 255), 1)
+    put_text(img, "EEG", (4, h // 2), FS, (255, 0, 255), anchor="lm")
     return img
 
 

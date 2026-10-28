@@ -529,6 +529,8 @@ def main(argv=None):
               "ticked (pyenv-win installs include it); on Linux install python3-tk.\n"
               "You can still run the viewer directly:  python -m src.run_seizure_demo --input <video>")
         return 1
+    from src.textdraw import make_dpi_aware
+    make_dpi_aware()                 # Windows: sharp text instead of a bitmap-upscaled window (before tk.Tk)
     root = tk.Tk()
     app = Launcher(root, data_dir, models_dir, shlex.split(a.viewer_args, posix=os.name != "nt"))
     if a.autorun:
