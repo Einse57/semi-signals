@@ -1,8 +1,9 @@
-"""Optional face stage: MediaPipe Face Landmarker (478 3D landmarks + 52 blendshapes) on a head crop.
+"""Optional face stage: MediaPipe Face Landmarker (478 3D landmarks + 52 blendshapes).
 
-The head crop comes from the COCO-17 head keypoints of the body pose (nose, eyes, ears), the same way
-the hand crops come from the wrists (src/hand_estimator.py). No separate face detection pass runs on
-the full frame; MediaPipe's own face detector only sees the crop.
+Where the landmarker looks is set by --face-preprocess (src/face_preprocess.py): by default the frame is
+taken to be the face region already ("none"); "detect" finds, crops and aligns the face; "coco-head"
+crops from the COCO-17 head keypoints of the body pose (nose, eyes, ears), the same way the hand crops
+come from the wrists (src/hand_estimator.py).
 
 Where it runs: MediaPipe Tasks runs the bundled TFLite models (BlazeFace short-range, Face Mesh V2,
 Blendshape V2) on its own CPU runtime (TFLite + XNNPACK). It does not use OpenVINO, so it stays on
@@ -150,7 +151,8 @@ class FaceEstimator:
 
     def __init__(self, model_path: str | os.PathLike | None = None, crop_scale: float = 2.0,
                  conf_thr: float = 0.3, min_det_conf: float = 0.5, min_presence: float = 0.5,
-                 transform: bool = False, num_threads: int | None = None) -> None:
+                 transform: bool = False, num_threads: int | None = None, num_faces: int = 1,
+                 blendshapes: bool = True) -> None:
         import mediapipe as mp
         from mediapipe.tasks.python import BaseOptions, vision
         path = Path(model_path) if model_path else FACE_TASK_PATH
@@ -159,9 +161,9 @@ class FaceEstimator:
         self._mp = mp
         opts = vision.FaceLandmarkerOptions(
             base_options=BaseOptions(model_asset_path=str(path)),
-            running_mode=vision.RunningMode.IMAGE, num_faces=1,
+            running_mode=vision.RunningMode.IMAGE, num_faces=int(num_faces),
             min_face_detection_confidence=min_det_conf, min_face_presence_confidence=min_presence,
-            output_face_blendshapes=True, output_facial_transformation_matrixes=transform)
+            output_face_blendshapes=blendshapes, output_facial_transformation_matrixes=transform)
         self._lm = vision.FaceLandmarker.create_from_options(opts)
         self._crop_scale, self._conf_thr, self._transform = crop_scale, conf_thr, transform
         self.model_path = str(path)
@@ -172,18 +174,18 @@ class FaceEstimator:
             self._lm.close()
             self._lm = None
 
-    def estimate_crop(self, frame: np.ndarray, box) -> dict | None:
-        """Run on one crop box; returns landmarks (478,3) in frame px, blendshapes (52,), score, bbox,
-        transform (4,4) or None if no face was found in the crop."""
-        crop = square_crop(frame, box)
-        if crop.size == 0:
+    def detect_image(self, img: np.ndarray, offset=(0.0, 0.0)) -> dict | None:
+        """Run the landmarker on a whole BGR image; landmarks (478, 3) in that image's px plus offset
+        (z on the x scale), blendshapes (52,), score, transform (4, 4). None if no face was found."""
+        if img.size == 0:
             return None
-        rgb = np.ascontiguousarray(crop[:, :, ::-1])
+        rgb = np.ascontiguousarray(img[:, :, ::-1])
         res = self._lm.detect(self._mp.Image(image_format=self._mp.ImageFormat.SRGB, data=rgb))
         if not res.face_landmarks:
             return None
-        side_w, side_h = crop.shape[1], crop.shape[0]
-        lm = np.array([[p.x * side_w + box[0], p.y * side_h + box[1], p.z * side_w]
+        side_w, side_h = img.shape[1], img.shape[0]
+        ox, oy = offset
+        lm = np.array([[p.x * side_w + ox, p.y * side_h + oy, p.z * side_w]
                        for p in res.face_landmarks[0]], np.float32)
         if lm.shape[0] != N_FACE:
             return None
@@ -200,8 +202,28 @@ class FaceEstimator:
         tf = np.full((4, 4), np.nan, np.float32)
         if self._transform and res.facial_transformation_matrixes:
             tf = np.asarray(res.facial_transformation_matrixes[0], np.float32).reshape(4, 4)
-        return dict(landmarks=lm, blendshapes=bs, score=np.float32(score),
-                    bbox=np.asarray(box[:4], np.float32), transform=tf)
+        return dict(landmarks=lm, blendshapes=bs, score=np.float32(score), transform=tf)
+
+    def all_faces(self, img: np.ndarray, offset=(0.0, 0.0)) -> list[np.ndarray]:
+        """Landmarks (478, 3) of every face found (up to num_faces), in img px plus offset. Used to blur
+        bystanders in de-identified video (src/segment_export.py)."""
+        if img.size == 0:
+            return []
+        rgb = np.ascontiguousarray(img[:, :, ::-1])
+        res = self._lm.detect(self._mp.Image(image_format=self._mp.ImageFormat.SRGB, data=rgb))
+        w, h = img.shape[1], img.shape[0]
+        return [np.array([[p.x * w + offset[0], p.y * h + offset[1], p.z * w] for p in f], np.float32)
+                for f in res.face_landmarks if len(f) == N_FACE]
+
+    def estimate_crop(self, frame: np.ndarray, box) -> dict | None:
+        """Run on one crop box; returns landmarks (478,3) in frame px, blendshapes (52,), score, bbox,
+        transform (4,4) or None if no face was found in the crop."""
+        crop = square_crop(frame, box)
+        r = self.detect_image(crop, offset=(box[0], box[1]))
+        if r is None:
+            return None
+        r["bbox"] = np.asarray(box[:4], np.float32)
+        return r
 
     def estimate(self, frame: np.ndarray, body_keypoints: np.ndarray, body_scores: np.ndarray,
                  body_bbox=None) -> dict | None:
@@ -217,8 +239,10 @@ class FaceEstimator:
 class FaceStage:
     """Run-time face tracking switch. The MediaPipe model loads the first time it is switched on."""
 
-    def __init__(self, model_path=None, on=False):
-        self.model_path, self.est, self.error = model_path, None, None
+    def __init__(self, model_path=None, on=False, preprocess=None):
+        from src.face_preprocess import DEFAULT_MODE
+        self.model_path, self.est, self.error, self.pre = model_path, None, None, None
+        self.preprocess = preprocess or DEFAULT_MODE
         self.on = False
         if on:
             self.toggle()
@@ -229,7 +253,9 @@ class FaceStage:
             return False
         if self.est is None:
             try:
+                from src.face_preprocess import FacePreprocessor
                 self.est = FaceEstimator(model_path=self.model_path)
+                self.pre = FacePreprocessor(self.est, self.preprocess)
                 self.error = None
                 print(f"[viewer] face model loaded: {self.est.model_path} (MediaPipe, CPU)")
             except Exception as e:      # missing mediapipe or model file: stay off, say why
@@ -238,6 +264,12 @@ class FaceStage:
                 return False
         self.on = True
         return True
+
+    def run(self, frame, body_keypoints=None, body_scores=None, body_bbox=None) -> dict | None:
+        """Face for the subject with the chosen preprocessing (src/face_preprocess.py); None if off or no face."""
+        if not self.on or self.pre is None:
+            return None
+        return self.pre.run(frame, body_keypoints, body_scores, body_bbox)
 
     def close(self):
         if self.est is not None:

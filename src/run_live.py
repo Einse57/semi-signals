@@ -45,6 +45,9 @@ def parse_args() -> argparse.Namespace:
                    help="Start with face tracking on (MediaPipe Face Landmarker on a head crop; key 'm')")
     p.add_argument("--no-face-mesh", action="store_true",
                    help="With face tracking: draw contours only, no mesh")
+    p.add_argument("--face-preprocess", default="none", choices=["none", "detect", "coco-head"],
+                   help="none = the frame is the face region (default); detect = find, crop and align; "
+                        "coco-head = crop from the body head keypoints")
     p.add_argument("--face-model", default=None,
                    help="face_landmarker.task (default models/face_landmarker.task)")
     return p.parse_args()
@@ -118,7 +121,7 @@ def main() -> None:
     print("[INFO] Keys: 'q' quit | 'h' toggle hands | 'm' toggle face | 'c' cycle camera")
     from src.face_estimator import FaceMotion, FaceStage
     from src.config import FACE_CHART_GROUPS
-    face = FaceStage(args.face_model, on=args.face)    # model loads on first enable
+    face = FaceStage(args.face_model, on=args.face, preprocess=args.face_preprocess)    # model loads on first enable
     face_mot = FaceMotion()
 
     frame_idx = 0
@@ -151,7 +154,7 @@ def main() -> None:
             metrics = motion_q.update(kpts, scores=kpt_scores,
                                        hand_results=hand_results)
             if face.on:
-                fr = face.est.estimate(frame, kpts, kpt_scores, body_bbox=best["bbox"])
+                fr = face.run(frame, kpts, kpt_scores, best["bbox"])
                 face_lm = fr["landmarks"] if fr is not None else None
                 face_mot.update(time.monotonic(), face_lm)
                 draw_face_mesh(frame, face_lm, mesh=not args.no_face_mesh)

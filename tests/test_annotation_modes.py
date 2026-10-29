@@ -129,6 +129,9 @@ def _clip_for_mode(tmp_path, mode):
 def test_render_settings_unchanged_for_body_and_face_adds_flag():
     assert "face" not in R.render_settings(R.parse_args(["--detector-a", "x.txt"]))
     assert R.render_settings(R.parse_args(["--detector-a", "x.txt", "--mode", "both"]))["face"] is True
+    st = R.render_settings(R.parse_args(["--detector-a", "x.txt", "--mode", "face", "--face-preprocess", "detect"]))
+    assert st["face_preprocess"] == "detect"
+    assert "face_preprocess" not in R.render_settings(R.parse_args(["--detector-a", "x.txt", "--face-preprocess", "detect"]))
 
 
 def test_face_mode_keys(tmp_path):

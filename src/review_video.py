@@ -68,6 +68,9 @@ def parse_args(argv=None):
     p.add_argument("--no-hands", action="store_true")
     p.add_argument("--mode", default="body", choices=list(MODES),
                    help="annotation mode: body (Body/Hands labels), face (face labels, face mesh render) or both")
+    p.add_argument("--face-preprocess", default="none", choices=["none", "detect", "coco-head"],
+                   help="face/both modes: none = the video is the face region (default); detect = find, crop and "
+                        "align the face; coco-head = crop from the body head keypoints (room video)")
     p.add_argument("--annotator", default=None)
     p.add_argument("--pat-id", default=None, help="patient id or pseudonym (never a real name)")
     p.add_argument("--consent", default="self", choices=["self", "public", "consented", "unknown"])
@@ -311,6 +314,7 @@ def render_settings(a):
              vsvig=bool(a.vsvig), hands=not a.no_hands)
     if wants_face(a):            # only when on, so renders made before modes existed stay fresh
         d["face"] = True
+        d["face_preprocess"] = getattr(a, "face_preprocess", "none")
     return d
 
 
@@ -348,7 +352,7 @@ def process(a, video):
     if a.no_hands:
         argv.append("--no-hands")
     if wants_face(a):
-        argv.append("--face")
+        argv += ["--face", "--face-preprocess", getattr(a, "face_preprocess", "none")]
     if a.headless_process or a.keys:
         argv.append("--headless")
     print("[review] processing (pose + Detector A); this takes about the length of the video")

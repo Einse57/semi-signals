@@ -80,6 +80,9 @@ def parse_args(argv=None):
                    help="start with face tracking on (MediaPipe Face Landmarker; toggle with m)")
     p.add_argument("--no-face-mesh", action="store_true", help="with face tracking: draw contours only, no mesh")
     p.add_argument("--face-model", default=None, help="face_landmarker.task (default models/face_landmarker.task)")
+    p.add_argument("--face-preprocess", default="none", choices=["none", "detect", "coco-head"],
+                   help="where the face landmarker looks: none = the frame is the face region (default); "
+                        "detect = find, crop and align the face; coco-head = crop from the body head keypoints")
     return p.parse_args(argv)
 
 
@@ -397,7 +400,7 @@ def main(argv=None):
     from src.face_estimator import FaceStage
     scorer = CausalScorer(booster, thr_a, a.fps, fnames=fnames, explain=not a.no_explain, start=a.start)
     models = dict(det=det, pose=pose, hand=hand, vs=vs, thr_a=thr_a, device=device, ieeg=ieeg, scorer=scorer,
-                  face=FaceStage(a.face_model, on=a.face))   # model loads on first enable
+                  face=FaceStage(a.face_model, on=a.face, preprocess=a.face_preprocess))   # model loads on first enable
 
     video, labels, n_pass = a.input, a.labels, 0
     first_video = str(Path(a.input).resolve())
@@ -560,7 +563,7 @@ def run_pass(a, M, video, labels, n_pass):
                     if hres[side] is not None:
                         hk[j], hs[j] = hres[side]["keypoints"], hres[side]["scores"]
             if fst.on:              # optional face stage: subject only, never feeds Detector A/B
-                fr_ = fst.est.estimate(frame, bk[sel], bs[sel], body_bbox=bb[sel]) if sel >= 0 else None
+                fr_ = fst.run(frame, bk[sel], bs[sel], bb[sel]) if sel >= 0 else fst.run(frame)
                 face_lm = fr_["landmarks"] if fr_ is not None else None
                 fmot.update(t, face_lm)
             if sel >= 0:
