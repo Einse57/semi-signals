@@ -428,6 +428,7 @@ def main(argv=None):
             print(f"[viewer] replay {n_pass + 1}")
     if not a.headless:
         cv2.destroyAllWindows()
+    models["face"].close()
 
 
 def end_screen(last, video):

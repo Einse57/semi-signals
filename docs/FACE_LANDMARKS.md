@@ -31,7 +31,7 @@ python scripts/fetch_models.py --face --skip-data      # models/face_landmarker.
 
 The model bundle is not in this repository. Source:
 `https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task`
-(`scripts/fetch_models.py` records its SHA-256 in `models/MANIFEST.json` and checks it against `FACE_SHA256` once that is pinned; the pin is not set yet).
+(SHA-256 `64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff`, pinned in `scripts/fetch_models.py`).
 
 ## Viewer and live view
 
@@ -77,6 +77,25 @@ crop method, whether the transform was saved.
 ```bash
 python -m src.batch_extract --out data/extract --face --face-transform data/pat10/Sz2P.mp4
 ```
+
+## Measurements
+
+`scripts/measure_face.py` times the per-frame pipeline (detection, body pose, hand pose, then face for the
+selected person) with face off and on, on the same pre-decoded frames, alternating off/on/off/on, without
+rendering. MediaPipe runs on its own TFLite/XNNPACK CPU runtime regardless of `--device`.
+
+```
+python scripts/measure_face.py --input clip.mp4 --device cpu --frames 150
+python scripts/measure_face.py --input clip.mp4 --device gpu --frames 150   # OpenVINO (Intel iGPU)
+```
+
+Recorded 2026-10-28 (150 timed frames after 10 warm-up frames, mean of the two runs per setting):
+
+| Host | Device (pose stack) | Clip | Face off FPS | Face on FPS | Face stage | Conditions |
+|---|---|---|---|---|---|---|
+| Linux VM, Intel Xeon, 8 vCPU | CPU, ONNX Runtime | 1280x720 test clip, face visible (160/160) | 7.6 | 7.9 | 10.8 ms | shared VM, load average 4 to 19 during the runs; run-to-run spread larger than the face cost |
+| Linux VM, Intel Xeon, 8 vCPU | CPU, ONNX Runtime | WU-SAHZU-EMU pat10 Sz2P from 20 s, faces pixelated (0/160) | 17.8 | 17.5 | 2.8 ms | same as above; hands not detected in this segment |
+| Core Ultra 9 285H | CPU / Arc 140T iGPU | | pending | pending | | to be recorded in a desktop-session scheduled task |
 
 ## Model card and licence notes
 
