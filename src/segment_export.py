@@ -113,6 +113,16 @@ def mask_faces(frame, lm, missing="frame", grow=0.25, others=(), style="fill"):
     if style == "fill":                  # solid mean colour of the face area
         out[mask > 0] = out[mask > 0].reshape(-1, 3).mean(0).astype(np.uint8)
         return out
+    if style in BASELINE_STYLES:         # mosaic / Gaussian blur, sized per face (measured baselines, not shareable)
+        src = frame.copy()
+        for f in faces:
+            m = np.zeros((h, w), np.uint8)
+            p = np.asarray(f, np.float32)[:, :2]
+            c = p.mean(0)
+            cv2.fillConvexPoly(m, cv2.convexHull(((p - c) * (1 + grow) + c).astype(np.int32)), 255)
+            if m.any():
+                _baseline_region(out, src, m, max(8.0, float(np.ptp(p[:, 0]))), style)
+        return out
     kk = max(15, int(size * 0.6) | 1)
     blurred = cv2.GaussianBlur(cv2.resize(cv2.resize(out, (max(1, w // 8), max(1, h // 8))), (w, h),
                                           interpolation=cv2.INTER_NEAREST), (kk, kk), 0)
@@ -120,9 +130,54 @@ def mask_faces(frame, lm, missing="frame", grow=0.25, others=(), style="fill"):
     return out
 
 
+# Measured baselines (local measurements only; never the shareable default). Sizes are relative to the face
+# bounding-box width W = horizontal extent of that face's landmarks (before the 25 % hull growth):
+#   mosaic8  : square blocks of round(W / 8) px (about 8 blocks across the face, 10 across the grown hull)
+#   mosaic16 : square blocks of round(W / 16) px (about 16 blocks across the face)
+#   gauss    : Gaussian blur, sigma = W / 6 px, kernel 2 * ceil(3 * sigma) + 1 px (square)
+# Blocks are anchored at the top-left of the grown hull's bounding box; only pixels inside the grown hull change.
+# Frames without a subject face (missing="frame") use the whole frame as the region, W = frame width.
+MOSAIC_BLOCKS = {"mosaic8": 8, "mosaic16": 16}
+GAUSS_SIGMA_FRAC = 1 / 6
+BASELINE_STYLES = ("mosaic8", "mosaic16", "gauss")
+
+
+def baseline_params(face_w, style):
+    """(block px, None) for mosaic styles, (None, (sigma px, kernel px)) for gauss."""
+    if style in MOSAIC_BLOCKS:
+        return max(2, int(round(face_w / MOSAIC_BLOCKS[style]))), None
+    s = max(1.0, face_w * GAUSS_SIGMA_FRAC)
+    return None, (s, 2 * int(np.ceil(3 * s)) + 1)
+
+
+def _baseline_region(out, src, mask, face_w, style):
+    ys, xs = np.nonzero(mask)
+    y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
+    b, g = baseline_params(face_w, style)
+    if b is not None:
+        crop = src[y0:y1, x0:x1]
+        ch, cw = crop.shape[:2]
+        nx, ny = -(-cw // b), -(-ch // b)
+        pad = cv2.copyMakeBorder(crop, 0, ny * b - ch, 0, nx * b - cw, cv2.BORDER_REPLICATE)
+        small = cv2.resize(pad, (nx, ny), interpolation=cv2.INTER_AREA)
+        proc = cv2.resize(small, (nx * b, ny * b), interpolation=cv2.INTER_NEAREST)[:ch, :cw]
+    else:
+        s, k = g
+        r = k // 2
+        H, W = src.shape[:2]
+        a0, a1, c0, c1 = max(0, y0 - r), min(H, y1 + r), max(0, x0 - r), min(W, x1 + r)
+        proc = cv2.GaussianBlur(src[a0:a1, c0:c1], (k, k), s, borderType=cv2.BORDER_REFLECT)[y0 - a0:y1 - a0, x0 - c0:x1 - c0]
+    sel = mask[y0:y1, x0:x1] > 0
+    out[y0:y1, x0:x1][sel] = proc[sel]
+
+
 def _whole(img, k, style):
     if style == "fill":
         return np.full_like(img, img.reshape(-1, 3).mean(0).astype(np.uint8))
+    if style in BASELINE_STYLES:
+        out = img.copy()
+        _baseline_region(out, img, np.full(img.shape[:2], 255, np.uint8), float(img.shape[1]), style)
+        return out
     return cv2.GaussianBlur(img, (k, k), 0)
 
 

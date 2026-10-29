@@ -174,3 +174,21 @@ def test_swap_variant_with_warp_backend(tmp_path):
     with pytest.raises(SystemExit, match="swap"):
         X.main(["--input", str(video), "--whole", "--out", str(tmp_path / "x"), "--raw-root", str(raw / "x"),
                 "--deid", "swap", "--swap-config", str(cfg)])
+
+
+def test_mosaic_and_gauss_baselines():
+    rng = np.random.default_rng(0)
+    f = rng.integers(0, 255, (200, 240, 3), np.uint8)
+    face = _ring(100, 100, 40)
+    w = float(np.ptp(np.asarray(face)[:, 0]))
+    for st, n in (("mosaic8", 8), ("mosaic16", 16)):
+        b, _ = X.baseline_params(w, st)
+        assert b == max(2, round(w / n))
+        out = X.mask_faces(f, face, style=st)
+        assert np.array_equal(out[0, 0], f[0, 0]) and not np.array_equal(out, f)
+    _, (s, k) = X.baseline_params(w, "gauss")
+    assert abs(s - w / 6) < 1e-6 and k % 2 == 1 and k >= 6 * s
+    g = X.mask_faces(f, face, style="gauss")
+    assert np.array_equal(g[0, 0], f[0, 0]) and g[90:110, 90:110].std() < 0.5 * f[90:110, 90:110].std()
+    assert X.mask_faces(f, None, style="mosaic8").shape == f.shape      # no subject face: whole frame
+    assert "mosaic8" not in X.VARIANTS and "gauss" not in X.VARIANTS     # not export variants
