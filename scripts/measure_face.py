@@ -31,6 +31,8 @@ def main(argv=None):
     ap.add_argument("--start", type=float, default=0.0, help="start time [s]")
     ap.add_argument("--warmup", type=int, default=10)
     ap.add_argument("--face-model", default=None)
+    ap.add_argument("--face-backend", default="mediapipe", choices=("mediapipe", "openvino"))
+    ap.add_argument("--face-device", default="CPU", type=str.upper)
     ap.add_argument("--json", default=None, help="also write the summary here")
     a = ap.parse_args(argv)
 
@@ -44,7 +46,7 @@ def main(argv=None):
     det = PersonDetector(device=a.device, backend=backend)
     pose = PoseEstimator(device=a.device, backend=backend)
     hand = HandEstimator(device=a.device, backend=backend)
-    face = FaceEstimator(model_path=a.face_model)
+    face = FaceEstimator(model_path=a.face_model, backend=a.face_backend, device=a.face_device)
 
     cap = cv2.VideoCapture(a.input)
     cap.set(cv2.CAP_PROP_POS_MSEC, a.start * 1000)

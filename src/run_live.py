@@ -50,6 +50,8 @@ def parse_args() -> argparse.Namespace:
                         "coco-head = crop from the body head keypoints")
     p.add_argument("--face-model", default=None,
                    help="face_landmarker.task (default models/face_landmarker.task)")
+    from src.face_estimator import add_face_backend_args
+    add_face_backend_args(p)
     return p.parse_args()
 
 
@@ -121,7 +123,8 @@ def main() -> None:
     print("[INFO] Keys: 'q' quit | 'h' toggle hands | 'm' toggle face | 'c' cycle camera")
     from src.face_estimator import FaceMotion, FaceStage
     from src.config import FACE_CHART_GROUPS
-    face = FaceStage(args.face_model, on=args.face, preprocess=args.face_preprocess)    # model loads on first enable
+    face = FaceStage(args.face_model, on=args.face, preprocess=args.face_preprocess,
+                     backend=args.face_backend, device=args.face_device)    # model loads on first enable
     face_mot = FaceMotion()
 
     frame_idx = 0

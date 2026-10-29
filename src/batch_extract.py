@@ -252,7 +252,7 @@ def process_video(path: Path, out_path: Path, det, pose, hand, fps: float, patch
         if face_tf:
             arrs["face_transform"] = np.array(FT, np.float32).reshape(-1, MAX_PERSONS, 4, 4)
         meta["face"] = dict(model="MediaPipe Face Landmarker", model_url=FACE_TASK_URL,
-                            model_file=os.path.basename(face.model_path), runtime="mediapipe (TFLite/XNNPACK, CPU)",
+                            model_file=os.path.basename(face.model_path), runtime=getattr(face, "runtime", "mediapipe (TFLite/XNNPACK, CPU)"),
                             schema="semi-signals.face/1", n_landmarks=N_FACE, blendshape_names=BLENDSHAPE_NAMES,
                             crop=("head keypoints (src/face_estimator.head_crop_bbox)" if face_pre is None
                                   or face_pre.mode == "coco-head" else f"face_preprocess={face_pre.mode}"),
@@ -303,6 +303,8 @@ def main(argv=None) -> int:
     ap.add_argument("--face-preprocess", default="none", choices=["none", "detect", "coco-head"],
                     help="with --face: none = frames are the face region (default); detect = find, crop and "
                          "align one face; coco-head = head crop of every person from the body keypoints")
+    from src.face_estimator import add_face_backend_args
+    add_face_backend_args(ap)
     a = ap.parse_args(argv)
 
     import cv2
@@ -323,7 +325,8 @@ def main(argv=None) -> int:
     if a.face:
         from src.face_estimator import FaceEstimator
         from src.face_preprocess import FacePreprocessor
-        face = FaceEstimator(model_path=a.face_model, transform=a.face_transform)
+        face = FaceEstimator(model_path=a.face_model, transform=a.face_transform,
+                             backend=a.face_backend, device=a.face_device)
         face_pre = FacePreprocessor(face, a.face_preprocess)
 
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)

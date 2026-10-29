@@ -83,6 +83,8 @@ def parse_args(argv=None):
     p.add_argument("--face-preprocess", default="none", choices=["none", "detect", "coco-head"],
                    help="where the face landmarker looks: none = the frame is the face region (default); "
                         "detect = find, crop and align the face; coco-head = crop from the body head keypoints")
+    from src.face_estimator import add_face_backend_args
+    add_face_backend_args(p)
     return p.parse_args(argv)
 
 
@@ -400,7 +402,8 @@ def main(argv=None):
     from src.face_estimator import FaceStage
     scorer = CausalScorer(booster, thr_a, a.fps, fnames=fnames, explain=not a.no_explain, start=a.start)
     models = dict(det=det, pose=pose, hand=hand, vs=vs, thr_a=thr_a, device=device, ieeg=ieeg, scorer=scorer,
-                  face=FaceStage(a.face_model, on=a.face, preprocess=a.face_preprocess))   # model loads on first enable
+                  face=FaceStage(a.face_model, on=a.face, preprocess=a.face_preprocess,
+                                 backend=a.face_backend, device=a.face_device))   # model loads on first enable
 
     video, labels, n_pass = a.input, a.labels, 0
     first_video = str(Path(a.input).resolve())

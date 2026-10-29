@@ -5,9 +5,11 @@ taken to be the face region already ("none"); "detect" finds, crops and aligns t
 crops from the COCO-17 head keypoints of the body pose (nose, eyes, ears), the same way the hand crops
 come from the wrists (src/hand_estimator.py).
 
-Where it runs: MediaPipe Tasks runs the bundled TFLite models (BlazeFace short-range, Face Mesh V2,
-Blendshape V2) on its own CPU runtime (TFLite + XNNPACK). It does not use OpenVINO, so it stays on
-the CPU when the body and hand models run on the Intel iGPU.
+Where it runs (backend="mediapipe", the default): MediaPipe Tasks runs the bundled TFLite models
+(BlazeFace short-range, Face Mesh V2, Blendshape V2) on its own CPU runtime (TFLite + XNNPACK), so it
+stays on the CPU when the body and hand models run on the Intel iGPU.
+backend="openvino": the same three models from the same bundle run with OpenVINO on CPU, GPU, NPU or
+AUTO (src/face_ov, a re-implementation of the MediaPipe graph; docs/FACE_OPENVINO.md).
 
 The model bundle is not in this repository: scripts/fetch_models.py --face downloads it and checks
 its SHA-256 (FACE_TASK_URL / FACE_TASK_SHA256 below). Google, Apache-2.0; see NOTICE and
@@ -27,6 +29,9 @@ FACE_TASK_URL = ("https://storage.googleapis.com/mediapipe-models/face_landmarke
                  "face_landmarker/float16/1/face_landmarker.task")
 FACE_TASK_SHA256 = "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff"  # checked by fetch_models.py
 FACE_TASK_PATH = Path(__file__).resolve().parent.parent / "models" / "face_landmarker.task"
+
+FACE_BACKENDS = ("mediapipe", "openvino")
+FACE_DEVICES = ("CPU", "GPU", "NPU", "AUTO")
 
 N_FACE = 478                     # 468 mesh + 10 iris landmarks
 N_BLEND = 52
@@ -147,73 +152,103 @@ def empty_face(n: int | None = None) -> dict:
 
 
 class FaceEstimator:
-    """MediaPipe Face Landmarker (IMAGE mode, one face per crop) on head crops from body keypoints."""
+    """Face Landmarker (IMAGE mode) on a whole image or a crop.
+
+    backend: "mediapipe" (MediaPipe Tasks, CPU; default) or "openvino" (src/face_ov on `device`)."""
 
     def __init__(self, model_path: str | os.PathLike | None = None, crop_scale: float = 2.0,
                  conf_thr: float = 0.3, min_det_conf: float = 0.5, min_presence: float = 0.5,
                  transform: bool = False, num_threads: int | None = None, num_faces: int = 1,
-                 blendshapes: bool = True) -> None:
-        import mediapipe as mp
-        from mediapipe.tasks.python import BaseOptions, vision
+                 blendshapes: bool = True, backend: str = "mediapipe", device: str = "CPU") -> None:
         path = Path(model_path) if model_path else FACE_TASK_PATH
         if not path.exists():
             raise FileNotFoundError(f"{path} not found: run python scripts/fetch_models.py --face")
+        if backend not in FACE_BACKENDS:
+            raise ValueError(f"face backend must be one of {FACE_BACKENDS}, not {backend!r}")
+        self.backend, self.device = backend, (str(device).upper() if backend == "openvino" else "CPU")
+        self._crop_scale, self._conf_thr, self._transform = crop_scale, conf_thr, transform
+        self.num_faces, self.blendshapes = int(num_faces), bool(blendshapes)
+        self.model_path = str(path)
+        self._lm = self._ov = None
+        if backend == "openvino":
+            from src.face_ov import FaceLandmarkerOV
+            expect = FACE_TASK_SHA256 if model_path is None else None
+            self._ov = FaceLandmarkerOV(path, device=self.device, video=False,
+                                        min_detection_confidence=min_det_conf,
+                                        min_presence_confidence=min_presence, expected_sha256=expect)
+            return
+        import mediapipe as mp
+        from mediapipe.tasks.python import BaseOptions, vision
         self._mp = mp
         opts = vision.FaceLandmarkerOptions(
             base_options=BaseOptions(model_asset_path=str(path)),
-            running_mode=vision.RunningMode.IMAGE, num_faces=int(num_faces),
+            running_mode=vision.RunningMode.IMAGE, num_faces=self.num_faces,
             min_face_detection_confidence=min_det_conf, min_face_presence_confidence=min_presence,
-            output_face_blendshapes=blendshapes, output_facial_transformation_matrixes=transform)
+            output_face_blendshapes=self.blendshapes, output_facial_transformation_matrixes=transform)
         self._lm = vision.FaceLandmarker.create_from_options(opts)
-        self._crop_scale, self._conf_thr, self._transform = crop_scale, conf_thr, transform
-        self.model_path = str(path)
+
+    @property
+    def runtime(self) -> str:
+        if self.backend == "openvino":
+            return f"openvino ({self.device})"
+        return "mediapipe (TFLite/XNNPACK, CPU)"
 
     def close(self):
         """Call before the program exits (MediaPipe cannot close its graph during interpreter shutdown)."""
         if self._lm is not None:
             self._lm.close()
             self._lm = None
+        if self._ov is not None:
+            self._ov.close()
+            self._ov = None
+
+    def _faces(self, img: np.ndarray, offset=(0.0, 0.0)) -> list[dict]:
+        """Every face found (up to num_faces): landmarks (478, 3) in img px plus offset (z on the x
+        scale), blendshapes (52,) (NaN when off), score, transform (4, 4) (NaN when off)."""
+        if img.size == 0:
+            return []
+        rgb = np.ascontiguousarray(img[:, :, ::-1])
+        w, h = img.shape[1], img.shape[0]
+        scale = np.array([w, h, w], np.float32)
+        off = np.array([offset[0], offset[1], 0.0], np.float32)
+        out = []
+        if self._ov is not None:
+            r = self._ov.process(rgb)
+            for f in ([] if r is None else [r]):
+                bs = f.blendshapes.astype(np.float32) if self.blendshapes else np.full(N_BLEND, np.nan, np.float32)
+                out.append(dict(landmarks=(f.landmarks * scale + off).astype(np.float32), blendshapes=bs,
+                                score=np.float32(1.0), transform=np.full((4, 4), np.nan, np.float32)))
+            return out
+        res = self._lm.detect(self._mp.Image(image_format=self._mp.ImageFormat.SRGB, data=rgb))
+        for i, f in enumerate(res.face_landmarks):
+            lm = np.array([[p.x, p.y, p.z] for p in f], np.float32) * scale + off
+            if lm.shape[0] != N_FACE:
+                continue
+            bs = np.full(N_BLEND, np.nan, np.float32)
+            if self.blendshapes and res.face_blendshapes and i < len(res.face_blendshapes):
+                for c in res.face_blendshapes[i]:
+                    if 0 <= c.index < N_BLEND:
+                        bs[c.index] = c.score
+            # The Tasks API reports no per-face confidence; a returned face passed both the detection
+            # (min_det_conf) and the presence (min_presence) thresholds. Landmark presence is used when
+            # the runtime fills it, else 1.0.
+            pres = [p.presence for p in f if getattr(p, "presence", None)]
+            tf = np.full((4, 4), np.nan, np.float32)
+            if self._transform and res.facial_transformation_matrixes and i < len(res.facial_transformation_matrixes):
+                tf = np.asarray(res.facial_transformation_matrixes[i], np.float32).reshape(4, 4)
+            out.append(dict(landmarks=lm, blendshapes=bs, score=np.float32(np.mean(pres) if pres else 1.0),
+                            transform=tf))
+        return out
 
     def detect_image(self, img: np.ndarray, offset=(0.0, 0.0)) -> dict | None:
-        """Run the landmarker on a whole BGR image; landmarks (478, 3) in that image's px plus offset
-        (z on the x scale), blendshapes (52,), score, transform (4, 4). None if no face was found."""
-        if img.size == 0:
-            return None
-        rgb = np.ascontiguousarray(img[:, :, ::-1])
-        res = self._lm.detect(self._mp.Image(image_format=self._mp.ImageFormat.SRGB, data=rgb))
-        if not res.face_landmarks:
-            return None
-        side_w, side_h = img.shape[1], img.shape[0]
-        ox, oy = offset
-        lm = np.array([[p.x * side_w + ox, p.y * side_h + oy, p.z * side_w]
-                       for p in res.face_landmarks[0]], np.float32)
-        if lm.shape[0] != N_FACE:
-            return None
-        bs = np.full(N_BLEND, np.nan, np.float32)
-        if res.face_blendshapes:
-            for c in res.face_blendshapes[0]:
-                if 0 <= c.index < N_BLEND:
-                    bs[c.index] = c.score
-        # The Tasks API reports no per-face confidence; a returned face passed both the detection
-        # (min_det_conf) and the presence (min_presence) thresholds. Landmark presence is used when
-        # the runtime fills it, else 1.0.
-        pres = [p.presence for p in res.face_landmarks[0] if getattr(p, "presence", None)]
-        score = float(np.mean(pres)) if pres else 1.0
-        tf = np.full((4, 4), np.nan, np.float32)
-        if self._transform and res.facial_transformation_matrixes:
-            tf = np.asarray(res.facial_transformation_matrixes[0], np.float32).reshape(4, 4)
-        return dict(landmarks=lm, blendshapes=bs, score=np.float32(score), transform=tf)
+        """First face on a whole BGR image (see _faces); None if no face was found."""
+        faces = self._faces(img, offset)
+        return faces[0] if faces else None
 
     def all_faces(self, img: np.ndarray, offset=(0.0, 0.0)) -> list[np.ndarray]:
         """Landmarks (478, 3) of every face found (up to num_faces), in img px plus offset. Used to blur
         bystanders in de-identified video (src/segment_export.py)."""
-        if img.size == 0:
-            return []
-        rgb = np.ascontiguousarray(img[:, :, ::-1])
-        res = self._lm.detect(self._mp.Image(image_format=self._mp.ImageFormat.SRGB, data=rgb))
-        w, h = img.shape[1], img.shape[0]
-        return [np.array([[p.x * w + offset[0], p.y * h + offset[1], p.z * w] for p in f], np.float32)
-                for f in res.face_landmarks if len(f) == N_FACE]
+        return [f["landmarks"] for f in self._faces(img, offset)]
 
     def estimate_crop(self, frame: np.ndarray, box) -> dict | None:
         """Run on one crop box; returns landmarks (478,3) in frame px, blendshapes (52,), score, bbox,
@@ -236,13 +271,22 @@ class FaceEstimator:
         return self.estimate_crop(frame, box)
 
 
-class FaceStage:
-    """Run-time face tracking switch. The MediaPipe model loads the first time it is switched on."""
+def add_face_backend_args(ap) -> None:
+    """--face-backend / --face-device for the scripts that take --face."""
+    ap.add_argument("--face-backend", default="mediapipe", choices=FACE_BACKENDS,
+                    help="face models on MediaPipe Tasks (CPU, default) or OpenVINO (src/face_ov)")
+    ap.add_argument("--face-device", default="CPU", type=str.upper, choices=FACE_DEVICES,
+                    help="with --face-backend openvino: OpenVINO device (default CPU)")
 
-    def __init__(self, model_path=None, on=False, preprocess=None):
+
+class FaceStage:
+    """Run-time face tracking switch. The face model loads the first time it is switched on."""
+
+    def __init__(self, model_path=None, on=False, preprocess=None, backend="mediapipe", device="CPU"):
         from src.face_preprocess import DEFAULT_MODE
         self.model_path, self.est, self.error, self.pre = model_path, None, None, None
         self.preprocess = preprocess or DEFAULT_MODE
+        self.backend, self.device = backend, device
         self.on = False
         if on:
             self.toggle()
@@ -254,11 +298,11 @@ class FaceStage:
         if self.est is None:
             try:
                 from src.face_preprocess import FacePreprocessor
-                self.est = FaceEstimator(model_path=self.model_path)
+                self.est = FaceEstimator(model_path=self.model_path, backend=self.backend, device=self.device)
                 self.pre = FacePreprocessor(self.est, self.preprocess)
                 self.error = None
-                print(f"[viewer] face model loaded: {self.est.model_path} (MediaPipe, CPU)")
-            except Exception as e:      # missing mediapipe or model file: stay off, say why
+                print(f"[viewer] face model loaded: {self.est.model_path} ({self.est.runtime})")
+            except Exception as e:      # missing runtime or model file: stay off, say why
                 self.error = str(e).splitlines()[0][:120]
                 print(f"[viewer] face tracking unavailable: {self.error}")
                 return False
