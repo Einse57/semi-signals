@@ -1,4 +1,4 @@
-# Face swap: licence audit (phase 1)
+# Face swap: licence audit (phases 1 and 2)
 
 Audit of GHOST (<https://github.com/ai-forever/ghost>, commit `44e58aa`, 2025-02-25) and everything it
 needs, done before any weights were downloaded or run. Read from the source repository, its release
@@ -97,20 +97,20 @@ Proposed: YuNet or MediaPipe for detection, SFace for the identity-similarity pa
 
 | Candidate | Source | Licence | Verdict |
 |---|---|---|---|
-| Landmark-driven warp of a synthetic donor face: Delaunay triangulation of the 478 MediaPipe landmarks, piecewise-affine warp of the donor texture onto the subject's landmarks per frame, colour matched and blended (OpenCV only) | no weights beyond MediaPipe | Apache-2.0 (MediaPipe), Apache-2.0 (OpenCV) | OK. Keeps expression and head motion through the landmarks; keeps the subject's face geometry (landmark positions), which is itself identifying |
-| LivePortrait (reenactment: animate a donor image with the subject's motion) | [KlingAIResearch/LivePortrait](https://github.com/KlingAIResearch/LivePortrait), [HF KwaiVGI/LivePortrait](https://huggingface.co/KwaiVGI/LivePortrait) | code MIT; HF weights `license:mit`. README: "The models of InsightFace are for non-commercial research purposes only. If you want to use the LivePortrait project for commercial purposes, you should remove and replace InsightFace's detection models" | **flagged** until checked further: OK only with the InsightFace detector and 106-point model replaced (MediaPipe/YuNet); provenance of `landmark.onnx` and of the training data not yet checked |
+| Landmark-driven warp of a synthetic donor face (implemented in phase 2 as backend `warp`, `src/deid_warp.py`): piecewise-affine warp over the 898 triangles of the MediaPipe canonical face mesh, colour matched and blended (OpenCV and numpy only) | MediaPipe Face Landmarker; `canonical_face_model.obj` (mesh topology) | Apache-2.0 (MediaPipe, mesh), Apache-2.0 (OpenCV) | OK. See "Phase 2" below for what carries over from the subject |
+| LivePortrait (reenactment: animate a donor image with the subject's motion) | [KlingTeam/LivePortrait](https://github.com/KlingTeam/LivePortrait) (was KlingAIResearch / KwaiVGI), [HF KlingTeam/LivePortrait](https://huggingface.co/KlingTeam/LivePortrait) | code MIT with NC-derived parts; bundled InsightFace models non-commercial; training data includes NC datasets | **excluded** as distributed; core weights **flagged**. Details in "Phase 2: LivePortrait" below |
 | SimSwap | [neuralchen/SimSwap](https://github.com/neuralchen/SimSwap) | "For academic and non-commercial use only. The whole project is under the CC-BY-NC 4.0 license." | **excluded** |
 | FaceFusion | [facefusion/facefusion](https://github.com/facefusion/facefusion) | OpenRAIL-AS (use restrictions); default models include InsightFace inswapper | **excluded** (models) / **flagged** (licence) |
 | InsightFace inswapper | InsightFace | licensing by email only | **excluded** |
 
-Proposed order: (1) landmark-driven warp, no new weights; (2) LivePortrait with InsightFace parts
-replaced, after its remaining files are checked.
+Phase 2 outcome: (1) landmark-driven warp implemented; (2) LivePortrait not used (verdict below).
 
 ### Donor faces
 
 | Candidate | Source | Licence | Verdict |
 |---|---|---|---|
-| Faces generated locally with FLUX.1 [schnell] | [HF black-forest-labs/FLUX.1-schnell](https://huggingface.co/black-forest-labs/FLUX.1-schnell) | `license:apache-2.0` | OK (outputs; check the model card's use policy before use) |
+| Faces generated locally with FLUX.1 [schnell] | [HF black-forest-labs/FLUX.1-schnell](https://huggingface.co/black-forest-labs/FLUX.1-schnell) | `license:apache-2.0` | Licence OK, but not used: see "Phase 2: FLUX.1 [schnell]" below |
+| Procedural donors rendered from the MediaPipe canonical face mesh (`src/deid_warp.render_donor`) | `canonical_face_model.obj` (Apache-2.0) | no photograph, no image model | OK. Used in phase 2 (stylised, not photographic) |
 | SFHQ synthetic faces | [SelfishGene/SFHQ-dataset](https://github.com/SelfishGene/SFHQ-dataset) | repo MIT; images made with StyleGAN2 (NVIDIA Source Code License-NC) and Stable Diffusion 2.1 (OpenRAIL++) | **flagged** |
 | Microsoft DigiFace-1M | [microsoft/DigiFace1M](https://github.com/microsoft/DigiFace1M) | "can be used for non-commercial research" | **excluded** |
 | Microsoft Face Synthetics | [microsoft/FaceSynthetics](https://github.com/microsoft/FaceSynthetics) | "can be used for non-commercial research" | **excluded** |
@@ -132,10 +132,93 @@ replaced, after its remaining files are checked.
   kornia is device-agnostic, so the port is code work rather than model work.
 - None of this matters until the weights question above is resolved.
 
+## Phase 2: FLUX.1 [schnell] (checked 2026-10-28)
+
+- Model card ([HF](https://huggingface.co/black-forest-labs/FLUX.1-schnell)): Apache-2.0; "can be used for
+  personal, scientific, and commercial purposes". The card's out-of-scope list (unlawful use, harm to
+  minors, disinformation, personal information used to harm, harassment, non-consensual nudity, automated
+  adverse decisions) does not cover synthetic donor faces.
+- The Hugging Face repository is gated: access requires an account that has accepted the terms and an
+  access token. None is configured here, so per the phase 2 instruction generation was stopped and no
+  weights were downloaded.
+- Size: about 12 B parameters. The working machine (8 vCPU, 15 GB RAM, about 3 GB free, no swap, no GPU)
+  cannot run it at useful speed in any case.
+- Fallback used: procedural donors rendered from the Apache-2.0 canonical face mesh (no photograph, no
+  image model), stored outside the repository with a provenance note. Photographic donors need either
+  FLUX access (token with accepted terms, a machine with enough memory) or another Apache/MIT generator;
+  no NC model is proposed.
+
+## Phase 2: LivePortrait (checked 2026-10-28; nothing cloned, downloaded or run)
+
+| Part | Source | Licence / provenance | Verdict |
+|---|---|---|---|
+| Code (top level) | [LICENSE](https://github.com/KlingTeam/LivePortrait/blob/main/LICENSE) | MIT, (c) 2024 Kuaishou Visual Generation and Interaction Center; the same file adds "The models of InsightFace are for non-commercial research purposes only" | OK on its own |
+| Code: `SPADE`, `SPADEResnetBlock` in `src/modules/util.py`, SPADE decoder | acknowledged [NVlabs/SPADE](https://github.com/NVlabs/SPADE) | NVlabs/SPADE is CC BY-NC-SA 4.0; whether LivePortrait's classes are copied or rewritten is not stated | **flagged** |
+| Code: keypoint/warping modules (`util.py` Hourglass, `kp2gaussian`, dense motion) | acknowledged FOMM and [Open Facevid2vid](https://github.com/zhanglonghao1992/One-Shot_Free-View_Neural_Talking_Head_Synthesis) | FOMM MIT; Open Facevid2vid CC BY-NC 4.0 (the paper says face vid2vid was reproduced from that implementation) | **flagged** |
+| Code: X-Pose (animals mode, `src/utils/dependencies/XPose`) | [IDEA-Research/X-Pose](https://github.com/IDEA-Research/X-Pose) | "License for Non-commercial Scientific Research Purposes" | **excluded** (not needed for humans) |
+| Weights `insightface/models/buffalo_l/det_10g.onnx`, `2d106det.onnx` | InsightFace buffalo_l | InsightFace README: models "available for non-commercial research purposes only"; buffalo_l licensing by email | **excluded** |
+| Weights `liveportrait/base_models/*.pth` (appearance, motion, warping, SPADE generator) and `retargeting_models/stitching_retargeting_module.pth` | HF repo, tag `license:mit`, not gated | MIT tag; trained on the data below | **flagged** (training data) |
+| Weights `liveportrait/landmark.onnx` | HF repo | no documented origin, architecture or training data | **flagged** (unknown provenance) |
+| Weights `liveportrait_animals/*`, `xpose.pth` | HF repo | X-Pose weights under the IDEA NC licence | **excluded** |
+| Motion extractor backbone | ConvNeXt-V2-Tiny | ConvNeXt-V2 code MIT, its released ImageNet weights CC BY-NC 4.0; the paper says the base model was trained from scratch | note only |
+| Training data ([arXiv 2407.03168](https://arxiv.org/abs/2407.03168) sec. 3.2) | VoxCeleb, MEAD, RAVDESS, AAHQ, plus private 4K portrait videos, 200 h of talking-head video, the private LightStage set and styled portraits; face-id loss with ArcFace | RAVDESS CC BY-NC-SA 4.0; AAHQ "academic research purpose only" (metadata CC BY-NC-SA 4.0); MEAD research-only; VoxCeleb is YouTube URLs (no longer distributed); private sets: terms unknown | **flagged** (NC and unknown sources) |
+
+Verdict against the project rules: LivePortrait as distributed is **excluded** (bundled InsightFace
+detection and landmark models are non-commercial). With those replaced by MediaPipe/YuNet, the remaining
+human-mode weights are still **flagged** (NC and private training data, undocumented `landmark.onnx`) and
+parts of the code are **flagged** (SPADE and face vid2vid derivations). Not used.
+
+## Phase 2: warp backend and measurements (2026-10-28)
+
+`warp` (src/deid_warp.py) warps a procedural donor over the MediaPipe mesh triangles, redraws the irises at
+the subject's iris positions, matches colour (Lab mean and spread) and blends with `cv2.seamlessClone`.
+Geometry `donor` (default) uses the donor's proportions for eyes, brows, nose and mouth plus the subject's
+expression (deviation from the subject's running mean shape); geometry `subject` uses the subject's own
+landmark positions. Carried over from the subject in both: face outline, expression, head pose, gaze,
+skin colour (mean and spread), hair, ears, neck, body and background; with `subject` also the face's
+proportions.
+
+Measured on the working machine (shared VM, 8 vCPU "Intel(R) Xeon(R) Processor", CPU only) on GRID clips
+bbad9n, bbae1p, bbae2a, lwwy7p (300 frames) and the two Intel sample clips (2810 frames). Detector hit =
+frames with at least one face (MediaPipe / YuNet). SFace = cosine similarity, original face vs the face
+YuNet finds at the same place in the output (n = face pairs), threshold 0.363. Landmark r = mean Pearson r
+of five face-region speeds; blendshape r = median r over 51 blendshapes (excluding `_neutral`), both on
+frames with a face in original and output. ms/frame = the method only; the landmark stage it needs costs
+another 41 (GRID) / 47 (Intel) ms/frame. Blur is a local review variant, listed for reference.
+
+| Method | Clips | MediaPipe hit | YuNet hit | SFace mean (n; share >= 0.363) | Landmark r | Blendshape r | ms/frame |
+|---|---|---|---|---|---|---|---|
+| original | GRID | 100 % | 100 % | - | - | - | - |
+| fill | GRID | 0 % | 0 % | no face (n 0) | undefined | undefined | 1.3 |
+| blur | GRID | 49 % | 100 % | 0.07 (300; 0 %) | 0.03 | -0.02 | 5.2 |
+| warp, donor geometry | GRID | 100 % | 100 % | 0.31 (300; 9 %) | 0.78 | 0.68 | 12.0 |
+| warp, subject geometry | GRID | 100 % | 100 % | 0.46 (300; 100 %) | 0.82 | 0.74 | 10.3 |
+| original | Intel | 73 % | 84 % | - | - | - | - |
+| fill | Intel | 0.2 % | 0.7 % | 0.75 (19; 79 %): faces the landmarker missed | (19 frames) | (19 frames) | 3.3 |
+| blur | Intel | 20 % | 51 % | -0.01 (1970; 1 %) | 0.16 | -0.06 | 7.4 |
+| warp, donor geometry | Intel | 73 % | 73 % | 0.22 (3866; 6 %) | 0.50 | 0.29 | 14.6 |
+| warp, subject geometry | Intel | 73 % | 73 % | 0.29 (3909; 15 %) | 0.68 | 0.40 | 12.9 |
+
+Notes: warp with subject geometry is above the SFace threshold in every GRID frame, so it does not
+de-identify by this measure; donor geometry lowers similarity but 9 % (GRID) and 6 % (Intel) of face pairs
+are still at or above the threshold. Similarity of the aligned crop at the original face position with the
+face filled is 0.30 on average (GRID), so values near 0.3 also reflect hair, outline and background. On
+Intel, faces the landmarker misses are left untouched by every method (19 fill frames). Hardware for an
+Intel iGPU run is still pending.
+
+## Phase 2: identity check models
+
+- YuNet `face_detection_yunet_2023mar.onnx` (OpenCV Zoo, MIT) and SFace `face_recognition_sface_2021dec.onnx`
+  (OpenCV Zoo, Apache-2.0), opencv_zoo commit 48b10fa505aeb51fbd127fc60a5c660040e823b7, pinned by sha256 in
+  `scripts/fetch_models.py --face-check`.
+- `canonical_face_model.obj` (MediaPipe, Apache-2.0), commit a908d668c730da128dfa8d9f6bd25d519d006692, same step.
+- OpenCV's SFace example treats cosine similarity >= 0.363 (or normalised L2 <= 1.128) as the same identity.
+
 ## What is in this repository
 
 - `src/deid_swap.py`: `FaceSwapper` protocol, backend registry, configuration checks (licence flag, model
-  files, donor and donor licence), `GhostSwapper` placeholder that refuses to load.
-- `src/deid_check.py`: check harness. Detector hit rate (default MediaPipe), identity similarity
-  (pluggable `Embedder`, none configured), landmark-region and blendshape motion correlation.
-- No weights, donor images or downloads.
+  files, donor and donor licence), `GhostSwapper` placeholder that refuses to load, `warp` backend.
+- `src/deid_warp.py`: mesh loader, procedural donor renderer, `WarpSwapper`.
+- `src/deid_check.py`: check harness. Detector hit rate (MediaPipe; YuNet with `--yunet`), identity
+  similarity (SFace on YuNet detections), landmark-region and blendshape motion correlation.
+- No weights, donor images or downloads; `scripts/fetch_models.py --face-check` fetches the files above.

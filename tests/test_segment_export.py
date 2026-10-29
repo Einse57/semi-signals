@@ -140,3 +140,36 @@ def test_blur_is_local_unless_requested(tmp_path):
             "--blur-in-export"])
     j = S.read_json(next(out2.rglob("*desc-blur_video.json")))
     assert j["NotForSharing"] is True
+
+
+MESH = REPO / "models" / "canonical_face_model.obj"
+
+
+@pytest.mark.skipif(not (MODEL.exists() and IMG.exists() and MESH.exists()), reason="model files or test image not present")
+def test_swap_variant_with_warp_backend(tmp_path):
+    from src import deid_warp as DW
+    dimg, dpts, info = DW.render_donor(MESH, seed=1, size=256)
+    cv2.imwrite(str(tmp_path / "donor.png"), dimg)
+    np.save(tmp_path / "donor.npy", dpts)
+    cfg = tmp_path / "swap.json"
+    cfg.write_text(json.dumps(dict(backend="warp", licence_reviewed=True, models=dict(face_mesh=str(MESH)),
+                                   donor=str(tmp_path / "donor.png"), donor_landmarks=str(tmp_path / "donor.npy"),
+                                   donor_licence="synthetic test donor")))
+    img = cv2.resize(cv2.imread(str(IMG)), (320, 226))
+    video = tmp_path / "clip.mp4"
+    w = cv2.VideoWriter(str(video), cv2.VideoWriter_fourcc(*"mp4v"), 10, (320, 226))
+    for _ in range(5):
+        w.write(img)
+    w.release()
+    out, raw = tmp_path / "deid", tmp_path / "raw"
+    for deid in ("swap", "ghost"):                                   # ghost is an alias of swap
+        o = out / deid
+        assert X.main(["--input", str(video), "--whole", "--out", str(o), "--raw-root", str(raw / deid),
+                       "--deid", deid, "--swap-config", str(cfg)]) == 0
+        j = S.read_json(next(o.rglob("*desc-swap_video.json")))
+        assert j["SwapBackend"] == "warp" and j["SwapDonorLicence"] == "synthetic test donor"
+        assert j["Deidentified"] is True and not list(o.rglob("*desc-ghost*"))
+    cfg.write_text(json.dumps(dict(json.loads(cfg.read_text()), licence_reviewed=False)))
+    with pytest.raises(SystemExit, match="swap"):
+        X.main(["--input", str(video), "--whole", "--out", str(tmp_path / "x"), "--raw-root", str(raw / "x"),
+                "--deid", "swap", "--swap-config", str(cfg)])

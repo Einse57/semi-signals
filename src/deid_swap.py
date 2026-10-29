@@ -1,8 +1,10 @@
-"""Pluggable face-swap de-identification (`--deid ghost`). SCAFFOLD: no models are wired in.
+"""Pluggable face-swap de-identification (`--deid swap`; `ghost` is accepted as an alias).
 
 A swapper replaces every face in a frame with a donor identity while keeping expression and head
 motion. The interface is model-agnostic so GHOST (github.com/ai-forever/ghost) or a substitute can be
-plugged in once its code and weights pass the licence audit (docs/FACE_SWAP_LICENCES.md).
+plugged in once its code and weights pass the licence audit (docs/FACE_SWAP_LICENCES.md). Backends:
+`warp` (src/deid_warp.py: landmark-driven warp of a synthetic donor, OpenCV and numpy only) and `ghost`
+(placeholder that refuses to load).
 
 Configuration is a JSON file (`--swap-config`, or SEMI_SIGNALS_SWAP_CONFIG):
 
@@ -12,6 +14,14 @@ Configuration is a JSON file (`--swap-config`, or SEMI_SIGNALS_SWAP_CONFIG):
      "donor": "/path/donor.png",            # synthetic or clearly licensed face, never a real person without a licence
      "donor_licence": "CC0 (synthetic, source URL)",
      "device": "cpu"}
+
+A `warp` configuration:
+
+    {"backend": "warp", "licence_reviewed": true,
+     "models": {"face_mesh": "models/canonical_face_model.obj"},   # scripts/fetch_models.py --face-check
+     "donor": "/path/donor.png", "donor_landmarks": "/path/donor_landmarks.npy",
+     "donor_licence": "synthetic: rendered by src/deid_warp.render_donor (seed 2)",
+     "geometry": "donor"}                   # or "subject"; see src/deid_warp.py
 
 Without a valid configuration every entry point raises SwapNotConfigured with what is missing; nothing is
 downloaded automatically.
@@ -29,7 +39,7 @@ ENV_CONFIG = "SEMI_SIGNALS_SWAP_CONFIG"
 
 
 class SwapNotConfigured(RuntimeError):
-    """Raised when --deid ghost is requested without approved, configured models."""
+    """Raised when --deid swap is requested without approved, configured models."""
 
 
 class FaceSwapper(Protocol):
@@ -37,14 +47,15 @@ class FaceSwapper(Protocol):
 
     def swap(self, frame: np.ndarray, faces: Sequence[np.ndarray]) -> np.ndarray:
         """Return a copy of the BGR frame with every face in `faces` (MediaPipe landmarks (478, 3) in frame
-        px) replaced by the donor identity. Must not return the input identity for any listed face."""
+        px) replaced by the donor identity. How much of the input identity remains is measured with
+        src/deid_check.py, not guaranteed by the interface."""
         ...
 
     def close(self) -> None:
         ...
 
 
-REQUIRED = {"ghost": ("generator", "face_detector", "id_embedder")}
+REQUIRED = {"ghost": ("generator", "face_detector", "id_embedder"), "warp": ("face_mesh",)}
 _REGISTRY: dict[str, type] = {}
 
 
@@ -59,7 +70,7 @@ def load_config(path: str | os.PathLike | None) -> dict:
     p = path or os.environ.get(ENV_CONFIG)
     if not p:
         raise SwapNotConfigured(
-            "--deid ghost needs a face-swap configuration (--swap-config <json> or "
+            "--deid swap needs a face-swap configuration (--swap-config <json> or "
             f"{ENV_CONFIG}). No swap models are configured in this repository; see docs/FACE_SWAP_LICENCES.md "
             "for the licence audit that must approve them first.")
     p = Path(p)
@@ -118,3 +129,10 @@ class GhostSwapper:
 
     def close(self):
         pass
+
+
+@register("warp")
+def _warp(cfg: dict):
+    """Landmark-driven warp of a synthetic donor (src/deid_warp.py); OpenCV and numpy only."""
+    from src.deid_warp import WarpSwapper
+    return WarpSwapper(cfg)

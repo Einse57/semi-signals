@@ -1,5 +1,5 @@
-"""Checks for a de-identified clip against its raw original. SCAFFOLD for the face-swap work; the detector
-pass and the motion pass run today with MediaPipe, the identity pass needs a configured embedder.
+"""Checks for a de-identified clip against its raw original: detector hit rate, identity similarity and
+motion preservation.
 
   python -m src.deid_check --original raw.mp4 --deid fill.mp4 [--embedder-config emb.json] [--json out.json]
 
@@ -7,8 +7,9 @@ pass and the motion pass run today with MediaPipe, the identity pass needs a con
    (default: MediaPipe Face Landmarker, whole frame + 4 tiles). For fill this should be ~0; for a face
    swap it should stay high (the swapped face is still a face) and the identity pass decides.
 2. identity similarity: cosine similarity between face embeddings of original and de-identified frames
-   (and donor, if given). Embedder is pluggable (Embedder protocol); none is bundled, because the common
-   ArcFace weights are not licensed for this use (docs/FACE_SWAP_LICENCES.md).
+   (and donor, if given). Embedder is pluggable (Embedder protocol); `sface` (OpenCV Zoo SFace, Apache-2.0,
+   on YuNet detections, MIT) is built in; the common ArcFace weights are not licensed for this use
+   (docs/FACE_SWAP_LICENCES.md). Model files are fetched by scripts/fetch_models.py --face-check.
 3. motion preservation: per-frame MediaPipe landmarks and blendshapes on both clips; Pearson correlation of
    face-region motion (head motion removed, src/face_estimator.FaceMotion regions) and of each blendshape
    over time. Fill removes the face, so this pass reports no face there.
@@ -33,8 +34,12 @@ class FaceDetector(Protocol):
 
 class Embedder(Protocol):
     name: str
-    def embed(self, frame: np.ndarray, landmarks: np.ndarray | None) -> np.ndarray | None:
-        """L2-normalised identity embedding of the face (landmarks in frame px), or None."""
+    def faces(self, frame: np.ndarray) -> list:
+        """Faces found in the frame, in the embedder's own format (e.g. YuNet rows)."""
+        ...
+    def embed(self, frame: np.ndarray, face) -> np.ndarray | None:
+        """L2-normalised identity embedding of `face` (one item of faces(), possibly from another frame of
+        the same size), or None."""
         ...
     def close(self) -> None: ...
 
@@ -81,6 +86,58 @@ def make_embedder(config_path=None) -> Embedder:
     return cls(cfg)
 
 
+class YuNetDetector:
+    """Face count with YuNet (OpenCV Zoo, MIT), cv2.FaceDetectorYN."""
+    name = "YuNet (OpenCV Zoo)"
+
+    def __init__(self, model_path, score=0.6):
+        self.model_path, self.score, self._size = str(model_path), score, None
+        self.det = cv2.FaceDetectorYN.create(self.model_path, "", (320, 320), score, 0.3, 5000)
+
+    def detect(self, frame):
+        h, w = frame.shape[:2]
+        if self._size != (w, h):
+            self.det.setInputSize((w, h))
+            self._size = (w, h)
+        _, faces = self.det.detect(frame)
+        return [] if faces is None else list(faces)
+
+    def count(self, frame):
+        return len(self.detect(frame))
+
+    def close(self):
+        pass
+
+
+@register_embedder("sface")
+class SFaceEmbedder:
+    """SFace (OpenCV Zoo face_recognition_sface, Apache-2.0) on YuNet detections (OpenCV Zoo, MIT).
+    Config: {"backend": "sface", "licence_reviewed": true, "model": ".../face_recognition_sface_2021dec.onnx",
+    "detector": ".../face_detection_yunet_2023mar.onnx"}. OpenCV's SFace example treats cosine >= 0.363
+    as the same identity (opencv_zoo models/face_recognition_sface/sface.py)."""
+    name = "SFace (OpenCV Zoo) + YuNet"
+    same_identity_threshold = 0.363
+
+    def __init__(self, cfg):
+        for k in ("model", "detector"):
+            if not cfg.get(k) or not Path(cfg[k]).exists():
+                raise EmbedderNotConfigured(f"sface: {k} not set or not found ({cfg.get(k)})")
+        self.yunet = YuNetDetector(cfg["detector"])
+        self.rec = cv2.FaceRecognizerSF.create(str(cfg["model"]), "")
+
+    def faces(self, frame):
+        return self.yunet.detect(frame)
+
+    def embed(self, frame, face):
+        crop = self.rec.alignCrop(frame, np.asarray(face, np.float32))
+        v = self.rec.feature(crop).ravel().astype(np.float32)
+        n = np.linalg.norm(v)
+        return v / n if n > 0 else None
+
+    def close(self):
+        pass
+
+
 def frames(path):
     cap = cv2.VideoCapture(str(path))
     while True:
@@ -103,21 +160,56 @@ def cosine(a, b):
     return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-12))
 
 
-def identity_similarity(orig, deid, embedder: Embedder, lmk_orig, lmk_deid, donor=None) -> dict:
-    """Separate landmarkers per clip: a tracking landmarker shared between the two would carry the
-    original's face position into the de-identified frames."""
-    sims, donor_sims = [], []
-    d_emb = embedder.embed(donor, None) if donor is not None else None
+def _iou(a, b):
+    ax, ay, aw, ah = a[:4]
+    bx, by, bw, bh = b[:4]
+    iw = max(0.0, min(ax + aw, bx + bw) - max(ax, bx))
+    ih = max(0.0, min(ay + ah, by + bh) - max(ay, by))
+    u = aw * ah + bw * bh - iw * ih
+    return iw * ih / u if u > 0 else 0.0
+
+
+def _stats(v, thr=None):
+    if not v:
+        return dict(n=0)
+    v = np.asarray(v, float)
+    d = dict(n=int(len(v)), mean=float(v.mean()), median=float(np.median(v)), max=float(v.max()))
+    if thr is not None:
+        d["frac_at_or_above_threshold"] = float((v >= thr).mean())
+    return d
+
+
+def identity_similarity(orig, deid, embedder: Embedder, donor=None) -> dict:
+    """Cosine similarity of identity embeddings, every face the embedder finds in each original frame:
+    - detected: against the face the embedder's detector finds at the same place (IoU >= 0.3) in the
+      de-identified frame (no value when it finds none there, e.g. fill);
+    - same_location: against the de-identified frame cropped and aligned at the ORIGINAL face's position,
+      so a value exists even when no face is detected (what is left at that spot).
+    - donor_vs_deid: de-identified faces against the donor image, if given."""
+    det, loc, don = [], [], []
+    d_emb = None
+    if donor is not None:
+        df = embedder.faces(donor)
+        d_emb = embedder.embed(donor, max(df, key=lambda f: f[2] * f[3])) if len(df) else None
     for fo, fd in zip(frames(orig), frames(deid)):
-        ro, rd = lmk_orig.run(fo), lmk_deid.run(fd)
-        eo = embedder.embed(fo, ro["landmarks"]) if ro else None
-        ed = embedder.embed(fd, rd["landmarks"]) if rd else None
-        if eo is not None and ed is not None:
-            sims.append(cosine(eo, ed))
-        if ed is not None and d_emb is not None:
-            donor_sims.append(cosine(d_emb, ed))
-    s = lambda v: dict(n=len(v), mean=float(np.mean(v)), max=float(np.max(v))) if v else dict(n=0)
-    return dict(embedder=embedder.name, original_vs_deid=s(sims), donor_vs_deid=s(donor_sims))
+        fds = embedder.faces(fd)
+        for face in embedder.faces(fo):
+            eo = embedder.embed(fo, face)
+            if eo is None:
+                continue
+            el = embedder.embed(fd, face)
+            if el is not None:
+                loc.append(cosine(eo, el))
+            best = max(fds, key=lambda g: _iou(face, g), default=None)
+            if best is not None and _iou(face, best) >= 0.3:
+                ed = embedder.embed(fd, best)
+                if ed is not None:
+                    det.append(cosine(eo, ed))
+                    if d_emb is not None:
+                        don.append(cosine(d_emb, ed))
+    thr = getattr(embedder, "same_identity_threshold", None)
+    return dict(embedder=embedder.name, same_identity_threshold=thr, detected=_stats(det, thr),
+                same_location=_stats(loc, thr), donor_vs_deid=_stats(don, thr))
 
 
 def pearson(a, b):
@@ -167,6 +259,7 @@ def main(argv=None):
     p.add_argument("--donor", default=None, help="donor face image (face swap only)")
     p.add_argument("--embedder-config", default=None)
     p.add_argument("--face-model", default=None)
+    p.add_argument("--yunet", default=None, help="also count faces with YuNet (face_detection_yunet_2023mar.onnx)")
     p.add_argument("--json", default=None, help="write the results here (keep it with the raw files)")
     a = p.parse_args(argv)
     from src.face_estimator import FaceEstimator
@@ -178,6 +271,9 @@ def main(argv=None):
                                detector="MediaPipe Face Landmarker (whole frame + 4 tiles)")
     finally:
         det.close()
+    if a.yunet:
+        yn = YuNetDetector(a.yunet)
+        res["detector_yunet"] = dict(original=hit_rate(a.original, yn), deid=hit_rate(a.deid, yn), detector=yn.name)
     ests = []
 
     def lmk():                                   # fresh estimator + tracker: no state shared between clips
@@ -188,7 +284,7 @@ def main(argv=None):
         try:
             emb = make_embedder(a.embedder_config)
             donor = cv2.imread(a.donor) if a.donor else None
-            res["identity"] = identity_similarity(a.original, a.deid, emb, lmk(), lmk(), donor)
+            res["identity"] = identity_similarity(a.original, a.deid, emb, donor)
             emb.close()
         except EmbedderNotConfigured as e:
             res["identity"] = dict(skipped=str(e))

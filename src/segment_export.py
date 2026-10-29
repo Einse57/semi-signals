@@ -18,8 +18,8 @@ events last --default-len-s), or the whole clip with --whole / without --annotat
       ..._desc-fill_video.mp4    (default) every face found painted with a solid colour (whole frame where
                                  the subject's face was not found)
       ..._desc-points_video.mp4  (default) landmarks drawn on a blank canvas
-      ..._desc-ghost_video.mp4   face swap to a donor identity (--deid ghost; scaffold, src/deid_swap.py,
-                                 needs approved models in --swap-config)
+      ..._desc-swap_video.mp4    face swap to a synthetic donor (--deid swap, src/deid_swap.py; the backend,
+                                 e.g. warp, comes from --swap-config; "ghost" is accepted as an alias)
       ..._landmarks.nc (+ .json) movement-layout landmarks, ..._blendshapes.nc
       ..._events.tsv (+ .json)   from the .eaf, times relative to the segment start, no notes
       sub-<id>_scans.tsv         acq_time shifted (random per subject, year <= 1925) or n/a
@@ -41,7 +41,8 @@ import numpy as np
 from src import segment_store as S
 
 REPO = Path(__file__).resolve().parent.parent
-VARIANTS = ("fill", "points", "ghost", "blur")
+VARIANTS = ("fill", "points", "swap", "blur")
+ALIASES = {"ghost": "swap"}
 NOT_FOR_SHARING = ("blur",)
 
 
@@ -57,11 +58,11 @@ def parse_args(argv=None):
     p.add_argument("--face-model", default=None)
     p.add_argument("--deid", default="fill,points",
                    help="comma list of video variants: fill (default; faces painted solid), points (default; "
-                        "landmarks only), ghost (face swap; needs --swap-config), blur (LOCAL REVIEW ONLY, NOT FOR "
+                        "landmarks only), swap (face swap to a donor; needs --swap-config; alias ghost), blur (LOCAL REVIEW ONLY, NOT FOR "
                         "SHARING: written under --raw-root unless --blur-in-export)")
     p.add_argument("--blur-in-export", action="store_true",
                    help="put the blur variant in the export too (marked NotForSharing in its sidecar)")
-    p.add_argument("--swap-config", default=None, help="face-swap configuration JSON for --deid ghost (src/deid_swap.py)")
+    p.add_argument("--swap-config", default=None, help="face-swap configuration JSON for --deid swap (src/deid_swap.py)")
     p.add_argument("--mode", default="both", choices=["body", "face", "both"], help="events that make segments")
     p.add_argument("--pre-s", type=float, default=2.0)
     p.add_argument("--post-s", type=float, default=2.0)
@@ -73,7 +74,7 @@ def parse_args(argv=None):
     p.add_argument("--acq-time", default=None, help="recording start, ISO 8601 (for EEG alignment via scans.tsv)")
     p.add_argument("--hed", action="store_true", help="add an (empty) HED column for HED-SCORE tags")
     p.add_argument("--missing-face", default="frame", choices=["frame", "none"],
-                   help="fill/blur/ghost frames without the subject's face: mask the whole frame (default) or leave them")
+                   help="fill/blur/swap frames without the subject's face: mask the whole frame (default) or leave them")
     p.add_argument("--no-bystanders", action="store_true",
                    help="mask only the subject's face (default: also every other face the landmarker finds)")
     p.add_argument("--device", default="cpu", help="for --face-preprocess coco-head (body pose)")
@@ -245,17 +246,17 @@ def main(argv=None):
     mapping = Path(a.mapping).resolve() if a.mapping else raw_root / "private_mapping.csv"
     check_raw_location(raw_root, out)
     S.check_outside(mapping, out, "--mapping")
-    variants = [v.strip() for v in a.deid.split(",") if v.strip()]
+    variants = list(dict.fromkeys(ALIASES.get(v.strip(), v.strip()) for v in a.deid.split(",") if v.strip()))
     for v in variants:
         if v not in VARIANTS:
             raise SystemExit(f"--deid: unknown variant {v!r} ({', '.join(VARIANTS)})")
     swapper = None
-    if "ghost" in variants:
+    if "swap" in variants:
         from src.deid_swap import SwapNotConfigured, make_swapper
         try:
             swapper = make_swapper(a.swap_config)
-        except SwapNotConfigured as e:
-            raise SystemExit(f"--deid ghost: {e}")
+        except (SwapNotConfigured, ValueError, OSError) as e:
+            raise SystemExit(f"--deid swap: {e}")
     export_variants = [v for v in variants if v != "blur" or a.blur_in_export]
     local_variants = [v for v in variants if v == "blur" and not a.blur_in_export]
     cap = cv2.VideoCapture(str(video))
@@ -278,7 +279,7 @@ def main(argv=None):
     run0 = max([int(r["run"]) for r in same_sub] or [0])
     est, pre, det, pose = make_preprocessor(a)
     multi = None
-    if any(v in variants for v in ("fill", "blur", "ghost")) and not a.no_bystanders:
+    if any(v in variants for v in ("fill", "blur", "swap")) and not a.no_bystanders:
         from src.face_estimator import FaceEstimator
         multi = FaceEstimator(model_path=a.face_model, num_faces=8, blendshapes=False)
     S.dataset_description(out, deidentified=True)
@@ -292,6 +293,8 @@ def main(argv=None):
             f0, f1 = int(round(seg["start"] * fps)), min(n, int(round(seg["end"] * fps)))
             cap.set(cv2.CAP_PROP_POS_FRAMES, f0)
             pre.reset()
+            if swapper is not None and hasattr(swapper, "reset"):
+                swapper.reset()                                  # per-segment face tracks (warp geometry)
             ws = {"raw": writer(R.video("raw"), fps, (W, H))}
             for v in export_variants:
                 ws[v] = writer(P.video(v), fps, (W, H))
@@ -317,10 +320,10 @@ def main(argv=None):
                 for v in ("fill", "blur"):
                     if v in ws:
                         ws[v].write(mask_faces(frame, lm, a.missing_face, others=oth or [], style=v))
-                if "ghost" in ws:
+                if "swap" in ws:
                     faces = ([lm] if lm is not None else []) + list(oth or [])
                     g = swapper.swap(frame, faces) if (lm is not None or a.missing_face == "none") else None
-                    ws["ghost"].write(g if g is not None else mask_faces(frame, None, "frame", style="fill"))
+                    ws["swap"].write(g if g is not None else mask_faces(frame, None, "frame", style="fill"))
                 if "points" in ws:
                     ws["points"].write(points_frame(frame.shape, lm))
             for w_ in ws.values():
@@ -335,7 +338,7 @@ def main(argv=None):
             descs = dict(fill="subject face area (landmark hull grown 25%)" + bys + " painted with its mean colour" + miss,
                          blur="LOCAL REVIEW ONLY, NOT FOR SHARING: face areas pixelated and blurred; face detectors "
                               "still find faces in blurred frames" + miss,
-                         ghost="faces replaced by a donor identity (face swap, " + (swapper.name if swapper else "-")
+                         swap="faces replaced by a donor identity (face swap, " + (swapper.name if swapper else "-")
                                + ")" + miss,
                          points="face landmarks drawn on a blank canvas; no image content")
             for v in variants:
@@ -343,10 +346,11 @@ def main(argv=None):
                 extra = dict(common, Variant=v, VariantDescription=descs[v], FramesWithFace=found)
                 if v in NOT_FOR_SHARING:
                     extra.update(NotForSharing=True, Deidentified=False)
-                if v in ("fill", "blur", "ghost"):
+                if v in ("fill", "blur", "swap"):
                     extra["BystanderFacesMasked"] = int(np.sum(n_other)) if multi is not None else None
-                if v == "ghost" and swapper is not None:
+                if v == "swap" and swapper is not None:
                     extra["SwapBackend"] = swapper.name
+                    extra["SwapDonorLicence"] = getattr(swapper, "donor_licence", None)
                 vp = R if local else P
                 S.write_json(vp.video_json(v), S.video_sidecar(vp.video(v), extra))
             S.write_json(R.video_json("raw"), S.video_sidecar(R.video("raw"), dict(Deidentified=False, Variant="raw",
