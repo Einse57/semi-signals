@@ -108,7 +108,7 @@ in the private mapping.
 |---|---|---|
 | `raw` | raw only | the source frames of the segment |
 | `fill` | export (default) | face areas painted with their mean colour: the subject's landmark hull grown by 25 %, plus every other face the landmarker finds (whole frame + four tiles; `--no-bystanders` turns this off). Frames without the subject's face are filled whole (`--missing-face frame`, default) |
-| `swap` | export (opt-in) | face swap to a donor identity (`--deid swap`; `ghost` is accepted as an alias). Needs `--swap-config` with a licence-reviewed backend and a licensed donor, and exits with an error otherwise. Backend `warp`: landmark-driven warp of a synthetic donor; the subject's face outline, expression, head pose, gaze, skin colour and everything outside the face remain, and an identity check still finds partial similarity (see [FACE_SWAP_LICENCES.md](FACE_SWAP_LICENCES.md)). Sidecar adds `SwapBackend` and `SwapDonorLicence` |
+| `swap` | export (opt-in) | REDUCED RISK, NOT DE-IDENTIFIED: face swap to a donor face (`--deid swap`; `ghost` is accepted as an alias). Needs `--swap-config` with a licence-reviewed backend and a licensed donor, and exits with an error otherwise. Backends: `warp` (landmark-driven warp of a synthetic donor), `ghost` and `liveportrait` (research use only; need `research_use_acknowledged`; code and weights outside the repository). The subject's face outline, hair, skin colour, head pose and expression remain, and an identity check still finds partial similarity (see [FACE_SWAP_LICENCES.md](FACE_SWAP_LICENCES.md)). Sidecar: `Deidentified: false`, `DeidentificationStatus: "reduced risk, not de-identified"`, `SwapBackend`, `SwapDonorLicence`, and `ResearchUseOnly: true` for ghost and liveportrait. Not a shareable default |
 | `blur` | raw only (opt-in) | **local review only, not for sharing.** Face areas pixelated and blurred. Written under `--raw-root`; `--blur-in-export` puts it in the export, with `NotForSharing: true` and `Deidentified: false` in its sidecar |
 | `points` | export | the subject's landmarks drawn on a black canvas, no image content |
 
@@ -137,10 +137,12 @@ outside `--out` (checked). Keep it with the source videos.
 - Landmarks, blendshapes and landmark-only video can be biometric identifiers (HIPAA, GDPR, state
   biometric laws).
 - Body, clothing, voice (if audio is added), room and timing can identify a person.
-- Face swapping (`--deid swap`) has one backend, `warp` (no learned generator). The licence audit and
-  measurements are in [FACE_SWAP_LICENCES.md](FACE_SWAP_LICENCES.md). The check harness
-  `python -m src.deid_check` reports the detector hit rate (MediaPipe, YuNet with `--yunet`), identity
-  similarity (SFace) and landmark and blendshape motion correlation between original and de-identified clips.
+- Face swapping (`--deid swap`) is reduced risk, not de-identification, with every backend (`warp`, and the
+  research-only `ghost` and `liveportrait`). The licence audit and measurements are in
+  [FACE_SWAP_LICENCES.md](FACE_SWAP_LICENCES.md). The check harness `python -m src.deid_check` reports the
+  detector hit rate (MediaPipe, YuNet with `--yunet`), identity similarity (SFace; ArcFace when a local
+  research-only model is configured) and landmark and blendshape motion correlation between original and
+  de-identified clips.
 
 ## Test data used during development (not in this repository)
 

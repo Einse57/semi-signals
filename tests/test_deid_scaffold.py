@@ -18,23 +18,50 @@ def test_swap_config_problems_listed(tmp_path):
     cfg = dict(backend="ghost", models=dict(generator=str(tmp_path / "G.pth")))
     probs = W.check_config(cfg)
     assert any("licence_reviewed" in p for p in probs)
-    assert any("face_detector" in p for p in probs) and any("G.pth" in p for p in probs)
+    assert any("models.code" in p for p in probs) and any("G.pth" in p for p in probs)
+    assert any("research_use_acknowledged" in p for p in probs)
     assert any("donor_licence" in p for p in probs)
     assert W.check_config(dict(backend="other")) and "unknown" in W.check_config(dict(backend="other"))[0]
 
 
-def test_ghost_backend_is_a_scaffold(tmp_path):
-    files = {k: tmp_path / f"{k}.bin" for k in W.REQUIRED["ghost"]}
+@pytest.mark.parametrize("backend", W.RESEARCH_ONLY)
+def test_research_backends_need_acknowledgement(tmp_path, backend):
+    files = {k: tmp_path / f"{k}.bin" for k in W.REQUIRED[backend]}
     for f in files.values():
         f.write_bytes(b"x")
     donor = tmp_path / "donor.png"
     donor.write_bytes(b"x")
-    cfg = tmp_path / "swap.json"
-    cfg.write_text(json.dumps(dict(backend="ghost", licence_reviewed=True, models={k: str(v) for k, v in files.items()},
-                                   donor=str(donor), donor_licence="synthetic, test")))
-    assert W.check_config(json.loads(cfg.read_text())) == []
-    with pytest.raises(W.SwapNotConfigured, match="scaffold"):
-        W.make_swapper(cfg)
+    cfg = dict(backend=backend, licence_reviewed=True, models={k: str(v) for k, v in files.items()},
+               donor=str(donor), donor_licence="synthetic, test")
+    probs = W.check_config(cfg)
+    assert len(probs) == 1 and "research_use_acknowledged" in probs[0]
+    assert W.check_config(dict(cfg, research_use_acknowledged=True)) == []
+    assert "warp" not in W.RESEARCH_ONLY and W.DEID_STATUS == "reduced risk, not de-identified"
+
+
+def test_ghost_alignment_matches_insightface_template():
+    from src import deid_ghost as G
+    tpl = G._SRC112[2] * 2                                       # frontal template, 224 px
+    A = np.array([[0.8, -0.3], [0.3, 0.8]])
+    kps = (tpl @ A.T + [40, 25]).astype(np.float32)              # similarity transform of the template
+    M = G.estimate_norm(kps)
+    np.testing.assert_allclose(np.c_[kps, np.ones(5)] @ M.T, tpl, atol=1e-3)
+    lm = np.zeros((478, 3), np.float32)
+    lm[[33, 133, 362, 263, 1, 61, 291], :2] = [[0, 0], [2, 0], [8, 0], [10, 0], [5, 5], [2, 9], [8, 9]]
+    np.testing.assert_allclose(G.five_points(lm), [[1, 0], [9, 0], [5, 5], [2, 9], [8, 9]])
+
+
+def test_arcface_embedder_needs_files_and_acknowledgement(tmp_path):
+    p = tmp_path / "e.json"
+    p.write_text(json.dumps(dict(backend="arcface", licence_reviewed=True, model=str(tmp_path / "none.onnx"))))
+    with pytest.raises(C.EmbedderNotConfigured, match="model"):
+        C.make_embedder(p)
+    for k in ("m.onnx", "d.onnx"):
+        (tmp_path / k).write_bytes(b"x")
+    p.write_text(json.dumps(dict(backend="arcface", licence_reviewed=True, model=str(tmp_path / "m.onnx"),
+                                 detector=str(tmp_path / "d.onnx"))))
+    with pytest.raises(C.EmbedderNotConfigured, match="research"):
+        C.make_embedder(p)
 
 
 def test_embedder_needs_config(tmp_path):

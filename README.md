@@ -153,9 +153,12 @@ export), a face-filled clip (faces painted with a solid colour) and a landmarks-
 layout), BIDS-style `events.tsv` / `scans.tsv` and a private mapping CSV. File names follow the BIDS
 audio/video proposal BEP047, which is not part of the BIDS specification. The format is provisional and
 may change: [docs/SEGMENT_STORAGE.md](docs/SEGMENT_STORAGE.md). A blurred variant (`--deid blur`) is for local
-review only and is not for sharing. A face-swap variant (`--deid swap --swap-config ...`) has one backend, a landmark-driven warp of a
-synthetic donor (OpenCV only); see [docs/FACE_SWAP_LICENCES.md](docs/FACE_SWAP_LICENCES.md) for the licence
-audit and what it does not remove.
+review only and is not for sharing. A face-swap variant (`--deid swap --swap-config ...`) is reduced risk, not
+de-identified (its sidecar says `Deidentified: false`); the face fill stays the shareable default. Its backends are
+a landmark-driven warp of a synthetic donor (OpenCV only) and adapters for GHOST and LivePortrait, which are
+research use only: their code and weights stay outside this repository and are never committed or
+redistributed. See [docs/FACE_SWAP_LICENCES.md](docs/FACE_SWAP_LICENCES.md) for the licences and what each
+backend does not remove.
 
 Model weights are not in this repository. Details: [docs/SEIZURE_DETECTION.md](docs/SEIZURE_DETECTION.md),
 [docs/detector_a_results.md](docs/detector_a_results.md),

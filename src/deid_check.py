@@ -8,8 +8,9 @@ motion preservation.
    swap it should stay high (the swapped face is still a face) and the identity pass decides.
 2. identity similarity: cosine similarity between face embeddings of original and de-identified frames
    (and donor, if given). Embedder is pluggable (Embedder protocol); `sface` (OpenCV Zoo SFace, Apache-2.0,
-   on YuNet detections, MIT) is built in; the common ArcFace weights are not licensed for this use
-   (docs/FACE_SWAP_LICENCES.md). Model files are fetched by scripts/fetch_models.py --face-check.
+   on YuNet detections, MIT) is built in and fetched by scripts/fetch_models.py --face-check. `arcface`
+   (an InsightFace ArcFace ONNX model, e.g. glintr100; non-commercial research use only, never committed)
+   runs on the same YuNet detections when its file is supplied locally (docs/FACE_SWAP_LICENCES.md).
 3. motion preservation: per-frame MediaPipe landmarks and blendshapes on both clips; Pearson correlation of
    face-region motion (head motion removed, src/face_estimator.FaceMotion regions) and of each blendshape
    over time. Fill removes the face, so this pass reports no face there.
@@ -131,6 +132,54 @@ class SFaceEmbedder:
     def embed(self, frame, face):
         crop = self.rec.alignCrop(frame, np.asarray(face, np.float32))
         v = self.rec.feature(crop).ravel().astype(np.float32)
+        n = np.linalg.norm(v)
+        return v / n if n > 0 else None
+
+    def close(self):
+        pass
+
+
+# InsightFace ArcFace 112-px alignment template (insightface python-package utils/face_align.py, MIT)
+ARCFACE_SRC = np.array([[38.2946, 51.6963], [73.5318, 51.5014], [56.0252, 71.7366],
+                        [41.5493, 92.3655], [70.7299, 92.2041]], np.float32)
+
+
+@register_embedder("arcface")
+class ArcFaceEmbedder:
+    """InsightFace ArcFace recognition ONNX model (e.g. antelopev2 glintr100.onnx; InsightFace models are for
+    non-commercial research only, so the file is never part of this repository) via onnxruntime on CPU, on
+    YuNet detections aligned to the ArcFace 5-point template. Config: {"backend": "arcface",
+    "licence_reviewed": true, "research_use_acknowledged": true, "model": ".../glintr100.onnx",
+    "detector": ".../face_detection_yunet_2023mar.onnx", "threshold": 0.30}.
+    InsightFace publishes no single same-identity threshold; its model guide puts 1:1 thresholds for its
+    recognition packs at cosine 0.30-0.45 (FMR 1e-4 to 1e-5). The default is the low end, 0.30, so more
+    frames count as the same person."""
+    name = "ArcFace (InsightFace ONNX) + YuNet"
+
+    def __init__(self, cfg):
+        for k in ("model", "detector"):
+            if not cfg.get(k) or not Path(cfg[k]).exists():
+                raise EmbedderNotConfigured(f"arcface: {k} not set or not found ({cfg.get(k)})")
+        if cfg.get("research_use_acknowledged") is not True:
+            raise EmbedderNotConfigured("arcface: InsightFace models are for non-commercial research only; set "
+                                        "research_use_acknowledged to true to use one")
+        import onnxruntime as ort
+        self.same_identity_threshold = float(cfg.get("threshold", 0.30))
+        self.yunet = YuNetDetector(cfg["detector"])
+        self.sess = ort.InferenceSession(str(cfg["model"]), providers=["CPUExecutionProvider"])
+        self.inp = self.sess.get_inputs()[0].name
+
+    def faces(self, frame):
+        return self.yunet.detect(frame)
+
+    def embed(self, frame, face):
+        pts = np.asarray(face[4:14], np.float32).reshape(5, 2)
+        M, _ = cv2.estimateAffinePartial2D(pts, ARCFACE_SRC, method=cv2.LMEDS)
+        if M is None:
+            return None
+        crop = cv2.warpAffine(frame, M, (112, 112), borderValue=0.0)
+        x = ((crop[:, :, ::-1].astype(np.float32) - 127.5) / 127.5).transpose(2, 0, 1)[None]
+        v = self.sess.run(None, {self.inp: x})[0].ravel().astype(np.float32)
         n = np.linalg.norm(v)
         return v / n if n > 0 else None
 

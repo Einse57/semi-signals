@@ -168,7 +168,8 @@ def test_swap_variant_with_warp_backend(tmp_path):
                        "--deid", deid, "--swap-config", str(cfg)]) == 0
         j = S.read_json(next(o.rglob("*desc-swap_video.json")))
         assert j["SwapBackend"] == "warp" and j["SwapDonorLicence"] == "synthetic test donor"
-        assert j["Deidentified"] is True and not list(o.rglob("*desc-ghost*"))
+        assert j["Deidentified"] is False and j["DeidentificationStatus"] == "reduced risk, not de-identified"
+        assert "ResearchUseOnly" not in j and not list(o.rglob("*desc-ghost*"))
     cfg.write_text(json.dumps(dict(json.loads(cfg.read_text()), licence_reviewed=False)))
     with pytest.raises(SystemExit, match="swap"):
         X.main(["--input", str(video), "--whole", "--out", str(tmp_path / "x"), "--raw-root", str(raw / "x"),

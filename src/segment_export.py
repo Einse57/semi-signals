@@ -19,7 +19,10 @@ events last --default-len-s), or the whole clip with --whole / without --annotat
                                  the subject's face was not found)
       ..._desc-points_video.mp4  (default) landmarks drawn on a blank canvas
       ..._desc-swap_video.mp4    face swap to a synthetic donor (--deid swap, src/deid_swap.py; the backend,
-                                 e.g. warp, comes from --swap-config; "ghost" is accepted as an alias)
+                                 warp, ghost or liveportrait, comes from --swap-config; "ghost" is also
+                                 accepted as an alias of the variant). REDUCED RISK, NOT DE-IDENTIFIED: its
+                                 sidecar says Deidentified false; ghost and liveportrait output is research
+                                 use only (ResearchUseOnly true).
       ..._landmarks.nc (+ .json) movement-layout landmarks, ..._blendshapes.nc
       ..._events.tsv (+ .json)   from the .eaf, times relative to the segment start, no notes
       sub-<id>_scans.tsv         acq_time shifted (random per subject, year <= 1925) or n/a
@@ -39,6 +42,7 @@ import cv2
 import numpy as np
 
 from src import segment_store as S
+from src.deid_swap import DEID_STATUS, RESEARCH_ONLY
 
 REPO = Path(__file__).resolve().parent.parent
 VARIANTS = ("fill", "points", "swap", "blur")
@@ -338,8 +342,9 @@ def main(argv=None):
             descs = dict(fill="subject face area (landmark hull grown 25%)" + bys + " painted with its mean colour" + miss,
                          blur="LOCAL REVIEW ONLY, NOT FOR SHARING: face areas pixelated and blurred; face detectors "
                               "still find faces in blurred frames" + miss,
-                         swap="faces replaced by a donor identity (face swap, " + (swapper.name if swapper else "-")
-                               + ")" + miss,
+                         swap="REDUCED RISK, NOT DE-IDENTIFIED: faces replaced by a donor face (face swap, "
+                              + (swapper.name if swapper else "-") + "); outline, hair, skin colour, pose and "
+                              "expression remain" + miss,
                          points="face landmarks drawn on a blank canvas; no image content")
             for v in variants:
                 local = v in local_variants
@@ -348,8 +353,12 @@ def main(argv=None):
                     extra.update(NotForSharing=True, Deidentified=False)
                 if v in ("fill", "blur", "swap"):
                     extra["BystanderFacesMasked"] = int(np.sum(n_other)) if multi is not None else None
+                if v == "swap":
+                    extra.update(Deidentified=False, DeidentificationStatus=DEID_STATUS)
                 if v == "swap" and swapper is not None:
                     extra["SwapBackend"] = swapper.name
+                    if swapper.name in RESEARCH_ONLY:
+                        extra["ResearchUseOnly"] = True
                     extra["SwapDonorLicence"] = getattr(swapper, "donor_licence", None)
                 vp = R if local else P
                 S.write_json(vp.video_json(v), S.video_sidecar(vp.video(v), extra))

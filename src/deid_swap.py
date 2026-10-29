@@ -1,21 +1,19 @@
-"""Pluggable face-swap de-identification (`--deid swap`; `ghost` is accepted as an alias).
+"""Pluggable face swap (`--deid swap`; `ghost` is accepted as an alias of the variant name).
 
-A swapper replaces every face in a frame with a donor identity while keeping expression and head
-motion. The interface is model-agnostic so GHOST (github.com/ai-forever/ghost) or a substitute can be
-plugged in once its code and weights pass the licence audit (docs/FACE_SWAP_LICENCES.md). Backends:
-`warp` (src/deid_warp.py: landmark-driven warp of a synthetic donor, OpenCV and numpy only) and `ghost`
-(placeholder that refuses to load).
+A swapper replaces every face in a frame with a donor face while keeping expression and head motion.
+Swap output is REDUCED RISK, NOT DE-IDENTIFIED: the outline, hair, skin colour, pose and expression of the
+subject remain and src/deid_check.py measures how much identity is left, so its sidecars carry
+Deidentified: false. The face fill (`--deid fill`) stays the only shareable default.
+
+Backends:
+- `warp` (src/deid_warp.py): landmark-driven warp of a synthetic donor; OpenCV and numpy only.
+- `ghost` (src/deid_ghost.py): GHOST AEI-Net generator, CPU port. RESEARCH USE ONLY.
+- `liveportrait` (src/deid_liveportrait.py): LivePortrait reenactment of the donor. RESEARCH USE ONLY.
+The research backends load third-party code and weights from a local location outside this repository
+(never committed or redistributed) and need "research_use_acknowledged": true; licences and the pinned
+sha256 of every weight file are in docs/FACE_SWAP_LICENCES.md.
 
 Configuration is a JSON file (`--swap-config`, or SEMI_SIGNALS_SWAP_CONFIG):
-
-    {"backend": "ghost",
-     "licence_reviewed": true,              # set only after the audit approves every file below
-     "models": {"generator": "/path/G.pth", "face_detector": "...", "id_embedder": "..."},
-     "donor": "/path/donor.png",            # synthetic or clearly licensed face, never a real person without a licence
-     "donor_licence": "CC0 (synthetic, source URL)",
-     "device": "cpu"}
-
-A `warp` configuration:
 
     {"backend": "warp", "licence_reviewed": true,
      "models": {"face_mesh": "models/canonical_face_model.obj"},   # scripts/fetch_models.py --face-check
@@ -23,8 +21,18 @@ A `warp` configuration:
      "donor_licence": "synthetic: rendered by src/deid_warp.render_donor (seed 2)",
      "geometry": "donor"}                   # or "subject"; see src/deid_warp.py
 
-Without a valid configuration every entry point raises SwapNotConfigured with what is missing; nothing is
-downloaded automatically.
+    {"backend": "ghost", "licence_reviewed": true, "research_use_acknowledged": true,
+     "models": {"code": "/path/third_party_local/ghost", "generator": "/path/G_unet_2blocks.pth",
+                "id_embedder": "/path/backbone.pth"},
+     "donor": ..., "donor_landmarks": ..., "donor_licence": ..., "device": "cpu"}
+
+    {"backend": "liveportrait", "licence_reviewed": true, "research_use_acknowledged": true,
+     "models": {"code": "/path/third_party_local/LivePortrait", "weights": "/path/weights/liveportrait"},
+     "donor": ..., "donor_landmarks": ..., "donor_licence": ..., "device": "cpu"}
+
+Donor faces must be synthetic or clearly licensed, never a real person without a licence. Without a valid
+configuration every entry point raises SwapNotConfigured with what is missing; nothing is downloaded
+automatically.
 """
 from __future__ import annotations
 
@@ -47,7 +55,7 @@ class FaceSwapper(Protocol):
 
     def swap(self, frame: np.ndarray, faces: Sequence[np.ndarray]) -> np.ndarray:
         """Return a copy of the BGR frame with every face in `faces` (MediaPipe landmarks (478, 3) in frame
-        px) replaced by the donor identity. How much of the input identity remains is measured with
+        px) replaced by the donor face. How much of the input identity remains is measured with
         src/deid_check.py, not guaranteed by the interface."""
         ...
 
@@ -55,7 +63,10 @@ class FaceSwapper(Protocol):
         ...
 
 
-REQUIRED = {"ghost": ("generator", "face_detector", "id_embedder"), "warp": ("face_mesh",)}
+REQUIRED = {"warp": ("face_mesh",), "ghost": ("code", "generator", "id_embedder"),
+            "liveportrait": ("code", "weights")}
+RESEARCH_ONLY = ("ghost", "liveportrait")
+DEID_STATUS = "reduced risk, not de-identified"
 _REGISTRY: dict[str, type] = {}
 
 
@@ -89,6 +100,9 @@ def check_config(cfg: dict) -> list[str]:
     if cfg.get("licence_reviewed") is not True:
         problems.append("licence_reviewed is not true: the code and every model file must pass the licence audit "
                         "(docs/FACE_SWAP_LICENCES.md) before use")
+    if backend in RESEARCH_ONLY and cfg.get("research_use_acknowledged") is not True:
+        problems.append(f"{backend} uses research-only code or weights (docs/FACE_SWAP_LICENCES.md): set "
+                        "research_use_acknowledged to true to use it locally; never commit or share its output")
     models = cfg.get("models") or {}
     for k in REQUIRED[backend]:
         if not models.get(k):
@@ -114,21 +128,17 @@ def make_swapper(config_path=None) -> FaceSwapper:
 
 
 @register("ghost")
-class GhostSwapper:
-    """Placeholder for GHOST (AEI-Net generator + ArcFace-style identity encoder). Phase 2 wires the models
-    in after approval; until then construction fails with SwapNotConfigured."""
-    name = "ghost"
+def _ghost(cfg: dict):
+    """GHOST (ai-forever/ghost) CPU port; research use only (src/deid_ghost.py)."""
+    from src.deid_ghost import GhostSwapper
+    return GhostSwapper(cfg)
 
-    def __init__(self, cfg: dict):
-        self.cfg = cfg
-        raise SwapNotConfigured("the GHOST backend is a scaffold: model loading is not implemented yet "
-                                "(waiting for licence approval, docs/FACE_SWAP_LICENCES.md)")
 
-    def swap(self, frame, faces):
-        raise SwapNotConfigured("GHOST backend not implemented")
-
-    def close(self):
-        pass
+@register("liveportrait")
+def _liveportrait(cfg: dict):
+    """LivePortrait (KlingTeam/LivePortrait) reenactment of the donor; research use only."""
+    from src.deid_liveportrait import LivePortraitSwapper
+    return LivePortraitSwapper(cfg)
 
 
 @register("warp")
