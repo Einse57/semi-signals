@@ -1,0 +1,110 @@
+# Optional face stage: MediaPipe Face Landmarker
+
+Off by default. With `--face` (viewer, live view, batch extraction) or the launcher's **Face (MediaPipe)**
+box, semi-signals adds dense face landmarks to the body + hand pipeline. Body, hand, Detector A and
+VSViG (Detector B) inputs are the same with face on or off: the face stage only adds outputs, and
+its signals are not fed to either detector.
+
+## Pipeline
+
+1. Body pose (RTMPose-m, COCO-17) as before.
+2. Head crop from the COCO head keypoints (nose, eyes, ears with score >= 0.3), `src/face_estimator.head_crop_bbox`:
+   - centre = mean of the visible head keypoints;
+   - face width estimated from each visible keypoint pair (ear-ear = 1.0, eye-eye = 0.45, eye-ear
+     = 0.35, nose-eye = 0.28, ...; the largest estimate wins);
+   - fallback when fewer than two head keypoints are visible: 0.4 x shoulder width, else
+     0.12 x the longer side of the person box;
+   - square crop, side = 2 x face width (minimum 48 px), zero-padded past the frame edge.
+3. MediaPipe Face Landmarker (IMAGE mode, one face per crop): 478 3D landmarks (468 mesh + 10 iris)
+   and 52 blendshape scores; optionally the facial transformation matrix.
+
+**Where it runs.** MediaPipe runs its bundled TFLite models on its own CPU runtime (TFLite +
+XNNPACK). It does not use OpenVINO or ONNX Runtime, so with `--device gpu` the body and hand models
+run on the Intel iGPU while the face stage runs on the CPU.
+
+## Setup
+
+```bash
+pip install mediapipe                                  # optional dependency
+python scripts/fetch_models.py --face --skip-data      # models/face_landmarker.task, sha256-checked
+```
+
+The model bundle is not in this repository. Source:
+`https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task`
+(`scripts/fetch_models.py` records its SHA-256 in `models/MANIFEST.json` and checks it against `FACE_SHA256` once that is pinned; the pin is not set yet).
+
+## Viewer and live view
+
+- `python -m src.run_seizure_demo --input clip.mp4 --face` (`--no-face-mesh` draws contours only).
+- `python -m src.run_live --face`.
+- Key `m` switches face tracking on and off while running; the model loads the first time it is switched on.
+  If MediaPipe or the model file is missing, the viewer keeps running and shows why face is unavailable.
+- The current mode (`Mode: Body + Hands` / `Mode: Body + Hands + Face`) is shown on screen.
+  In the seizure viewer the mode is in the legend under the video; with face on it is also drawn on the video.
+  With face off the rendered video (`--save`) is unchanged.
+- Face motion graphs (seizure viewer: under the body motion graphs; live view: under the region charts):
+
+| Region | Landmarks |
+|---|---|
+| mouth | lips (outer + inner contour) |
+| l_eye / r_eye | eyelids + iris |
+| l_face / r_face | face oval, brow, eyelids, cheek and mouth corner of one side |
+
+`l_` / `r_` are the subject's left and right (as in COCO-17 and MediaPipe's `*Left` / `*Right` blendshapes),
+not the viewer's. A mirrored image swaps them.
+
+Region motion = mean landmark displacement between consecutive frames after a 2D similarity alignment
+(rotation, scale, translation fitted on all 478 points), divided by the face width (landmarks 234-454)
+and the time step, in face widths per second. The alignment removes rigid head movement, so the graphs
+show movement within the face.
+
+## batch_extract output (`--face`, schema `semi-signals.face/1`)
+
+Added to each `<video>.npz` only with `--face`; without it the file is unchanged.
+F = sampled frames, P = 3 person slots (same order as `body_kpts`).
+
+| Key | Shape | dtype | Content |
+|---|---|---|---|
+| `face_landmarks` | (F, P, 478, 3) | float32 | x, y in frame pixels; z in pixels on the x scale, relative to the face centre (MediaPipe convention, smaller = closer to the camera). NaN = no face |
+| `face_blendshapes` | (F, P, 52) | float32 | blendshape scores 0..1, names in `meta["face"]["blendshape_names"]` (index 0 is `_neutral`). NaN = no face |
+| `face_scores` | (F, P) | float32 | 1.0 = a face passed MediaPipe's detection and presence thresholds (0.5 each); NaN = no face or no person. The Tasks API reports no per-face confidence |
+| `face_boxes` | (F, P, 4) | float32 | head crop x1, y1, x2, y2 that was used; NaN = no crop (also kept when no face was found in it) |
+| `face_transform` | (F, P, 4, 4) | float32 | only with `--face-transform`: MediaPipe's facial transformation matrix (canonical face model to the detected face, in the crop's camera frame). NaN = no face |
+
+`meta["face"]`: model name, URL, file name, runtime, schema, number of landmarks, blendshape names,
+crop method, whether the transform was saved.
+
+```bash
+python -m src.batch_extract --out data/extract --face --face-transform data/pat10/Sz2P.mp4
+```
+
+## Model card and licence notes
+
+MediaPipe Face Landmarker (BlazeFace short-range detector, Face Mesh V2, Blendshape V2), Google,
+Apache License 2.0. Points from the model cards that apply here:
+
+- Intended use is AR / entertainment / selfie effects. The cards state the models are not intended for
+  human life-critical decisions. In semi-signals the face outputs are research annotations, not a diagnosis.
+- The landmarks and blendshapes do not provide facial recognition or identification; surveillance and
+  identity recognition are out of scope.
+- The models were built for selfie-style views: quality drops when the face is turned more than about 80
+  degrees from the camera, rolled, less than half visible, or small/far away (BlazeFace short-range: faces
+  within about 2 m; head yaw up to 90, roll and pitch up to 45 degrees). Patients in bed filmed from an
+  EMU ceiling or wall camera are outside the training distribution. The head crop helps with distance, not
+  with pose or occlusion (blankets, electrodes, hands, tubing).
+- Fairness evaluations in the cards report results across regions, skin tones and genders (Face Mesh
+  error 2.06-3.27% of the interocular distance across regions); blendshape training used lab captures
+  and synthetic (GHUM) faces.
+- Blendshape `*Left` / `*Right` refer to the subject's side; mirrored video swaps them.
+
+Model cards: https://storage.googleapis.com/mediapipe-assets/MediaPipe%20BlazeFace%20Model%20Card%20(Short%20Range).pdf,
+https://storage.googleapis.com/mediapipe-assets/Model%20Card%20MediaPipe%20Face%20Mesh%20V2.pdf,
+https://storage.googleapis.com/mediapipe-assets/Model%20Card%20Blendshape%20V2.pdf
+
+## Privacy
+
+Dense face landmarks (and to a lesser extent blendshapes) describe face shape and may count as
+biometric identifiers under HIPAA, GDPR and state biometric laws, even without any image. Treat
+`face_*` arrays like the video they came from. A points-only export (no frames, crops or thumbnails;
+optional canonical-pose normalisation and iris removal; random segment IDs) reduces re-identification
+risk; it does not guarantee de-identification.
