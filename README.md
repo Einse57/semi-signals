@@ -112,7 +112,37 @@ python scripts/fetch_models.py            # pose models, VSViG-base -> OpenVINO 
 python -m src.run_seizure_demo --input data/pat10/Sz2P.mp4 --labels data/Label.xlsx [--loop]
 python -m src.launcher                    # the launcher window (what start.cmd opens)
 python -m src.review_video                # load your own video and annotate it
+python -m src.review_video --mode face    # annotate face events (face mesh render, face label set)
 ```
+
+### Annotation modes and label sets
+The annotation tool has three modes (launcher **Annotation mode**, or `--mode`): **Body/Hands** (default),
+**Face** (the render adds the MediaPipe face mesh; see [docs/FACE_LANDMARKS.md](docs/FACE_LANDMARKS.md)) and
+**Both** (`o` body onset, `f` face onset). Face events use the same timing fields as body events (clinical
+onset, clinical end, optional EEG onset), an optional note and an optional side (`d`: L / R / both). Each
+event stores its `mode`; face events go to their own `Face_event` EAF tier and never into `Seizure`, and
+Detector A is compared with body events only. Files written before modes existed load as body events.
+
+The fields come from `labels/body.json` and `labels/face.json` (schema `semi-signals.labels/1`). The face
+set starts without a term list, so `t` does nothing for face events. To add a vetted list later (for
+example from the ILAE seizure semiology glossary or a clinical expert), with no code change:
+
+1. Edit `labels/face.json`: fill `term.choices` with the terms and `term.source` with where they come from
+   (keep `term.field` = `face_term` and `term.tier` = `Face_term`).
+2. Restart the annotation tool. `t` on a face event then opens the list; terms are saved in the
+   `Face_term` EAF tier (a child of `Face_event`) and in `face_term` in the JSON.
+
+`labels/<mode>.yaml` is read instead of the `.json` file when it exists and PyYAML is installed;
+`SEMI_SIGNALS_LABELS=<folder>` points to another folder of label files. The timing fields are fixed and
+shared by both modes.
+
+### Points-only segment export
+`python -m src.points_export --npz <extract>.npz --annotations <stem>.annotation.json --out <folder>
+--mapping <private.csv> [--mode face] [--drop-iris] [--canonical-face]` writes one file per annotated event
+with keypoints, scores, blendshapes and time relative to the clinical onset: no frames, crops, names, paths
+or dates, random segment ids, and a separate private mapping file. Dense face landmarks may still be
+biometric identifiers, so this reduces re-identification risk; it is not de-identification. Details:
+[docs/FACE_LANDMARKS.md](docs/FACE_LANDMARKS.md#points-only-segment-export).
 
 Model weights are not in this repository. Details: [docs/SEIZURE_DETECTION.md](docs/SEIZURE_DETECTION.md),
 [docs/detector_a_results.md](docs/detector_a_results.md),
