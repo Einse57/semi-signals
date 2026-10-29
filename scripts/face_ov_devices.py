@@ -5,12 +5,14 @@
 Per model and device: read through the TFLite frontend, compile with the input shape as stored (the
 landmark model has a dynamic batch) and with a static [1, ...] shape, each with the device default
 precision and with f32 / f16 hints, plus a second compile from an IR cache. Each compiled model runs one
-random input; the output is compared with CPU f32 (cosine, max abs).
+random input; the output is compared with CPU f32 (cosine, max abs). Each model/device pair runs in its
+own process, so a compiler crash is recorded (exit code) instead of ending the run.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 import tempfile
 import time
@@ -40,15 +42,37 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--task", default=str(ROOT / "models" / "face_landmarker.task"))
     ap.add_argument("--devices", nargs="+", default=["CPU", "GPU", "NPU"])
-    ap.add_argument("--json", required=True)
+    ap.add_argument("--json", default=None)
+    ap.add_argument("--one", nargs=2, metavar=("MODEL", "DEVICE"), help=argparse.SUPPRESS)
     a = ap.parse_args()
+    if a.one:
+        return one(a.task, *a.one)
     import openvino as ov
     core = ov.Core()
-    paths = unpack_task(a.task)
-    rng = np.random.default_rng(0)
     out = {"openvino": ov.__version__, "available": core.available_devices,
            "names": {d: core.get_property(d, "FULL_DEVICE_NAME") for d in core.available_devices}, "models": {}}
-    for name, shape in SHAPES.items():
+    for name in SHAPES:
+        for dev in a.devices:
+            p = subprocess.run([sys.executable, "-W", "ignore", __file__, "--task", a.task, "--one", name, dev],
+                               capture_output=True, text=True, timeout=900)
+            line = [x for x in p.stdout.splitlines() if x.startswith("{")]
+            rep = json.loads(line[-1]) if line else {}
+            if p.returncode != 0 or not line:
+                rep.setdefault(dev, {})["process"] = {"exit_code": p.returncode,
+                                                      "stderr_tail": p.stderr.strip().splitlines()[-3:]}
+            m = out["models"].setdefault(name, {k: v for k, v in rep.items() if k in ("inputs", "outputs", "ops")})
+            m[dev] = rep.get(dev, {})
+            print(name, dev, json.dumps(m[dev])[:700], flush=True)
+            Path(a.json).write_text(json.dumps(out, indent=1))
+
+
+def one(task, name, dev):
+    import openvino as ov
+    core = ov.Core()
+    paths = unpack_task(task)
+    shape = SHAPES[name]
+    rng = np.random.default_rng(0)
+    if True:
         x = (rng.uniform(-1, 1, shape) if "detector" in name else rng.uniform(0, 1, shape) if "landmarks" in name
              else rng.uniform(50, 300, shape)).astype(np.float32)
         m0 = core.read_model(str(paths[name]))
@@ -56,10 +80,11 @@ def main():
                "outputs": [f"{o.get_any_name()} {o.get_partial_shape()}" for o in m0.outputs],
                "ops": len(m0.get_ops())}
         ref = _run(core.compile_model(_static(core, paths[name], shape), "CPU", {"INFERENCE_PRECISION_HINT": "f32"}), x)
-        for dev in a.devices:
+        for dev in (dev,):
             d = rep.setdefault(dev, {})
             for label, static, hint in (("as_stored", False, None), ("static", True, None),
                                         ("static_f32", True, "f32"), ("static_f16", True, "f16")):
+                print(json.dumps(rep), flush=True)
                 try:
                     m = _static(core, paths[name], shape) if static else core.read_model(str(paths[name]))
                     t0 = time.perf_counter()
@@ -82,9 +107,7 @@ def main():
                     d["ir_cache_ms"] = {"first": t[0], "cached": t[1]}
             except Exception as e:         # noqa: BLE001
                 d["ir_cache_ms"] = {"error": f"{type(e).__name__}: {str(e).splitlines()[0][:240]}"}
-            print(name, dev, json.dumps(d)[:600], flush=True)
-        out["models"][name] = rep
-    Path(a.json).write_text(json.dumps(out, indent=1))
+        print(json.dumps(rep), flush=True)
 
 
 def _static(core, path, shape):
