@@ -20,6 +20,12 @@ MOTION_GROUPS = [("Hands", ["l_hand", "r_hand"]), ("Arms", ["l_arm", "r_arm"]), 
                  ("Legs", ["l_leg", "r_leg"]), ("Whole body", ["overall"])]
 SHORT = {"l_hand": "L hand", "r_hand": "R hand", "l_arm": "L arm", "r_arm": "R arm", "head": "head",
          "l_leg": "L leg", "r_leg": "R leg", "overall": "all"}
+# Face motion (optional --face): subject's left = green, right = blue, as for the body regions
+FACE_GROUPS = [("Mouth", ["mouth"]), ("Eyes", ["l_eye", "r_eye"]), ("Face L/R", ["l_face", "r_face"])]
+FACE_COLORS = {"mouth": (0, 165, 255), "l_eye": (0, 200, 0), "r_eye": (200, 0, 0),
+               "l_face": (0, 200, 0), "r_face": (200, 0, 0)}
+SHORT.update({"mouth": "mouth", "l_eye": "L eye", "r_eye": "R eye", "l_face": "L face", "r_face": "R face"})
+FACE_HDR = "Face motion (head motion removed, face widths/s)"
 DISCLAIMER = "Drivers explain the model score, not clinical cause. Research use only, not diagnostic."
 
 
@@ -134,14 +140,17 @@ def draw_drivers(w, h, drivers, p_smooth, min_p=0.5):
     return img
 
 
-def draw_motion(w, h, now, span, t, regions, highlight, marks, floor=0.15):
-    """t: per-frame times; regions: {name: per-frame speed}; highlight: set of region names."""
-    n = len(MOTION_GROUPS)
+def draw_motion(w, h, now, span, t, regions, highlight, marks, floor=0.15, groups=None, hdr=None, colors=None):
+    """t: per-frame times; regions: {name: per-frame speed}; highlight: set of region names.
+    groups/hdr/colors default to the body motion graphs (MOTION_GROUPS, REGION_COLORS)."""
+    groups = MOTION_GROUPS if groups is None else groups
+    cmap = REGION_COLORS if colors is None else colors
+    n = len(groups)
     per = h // n
     ax = Axis(w, now, span)
     t = np.asarray(t, float)
     strips = []
-    for title, keys in MOTION_GROUPS:
+    for title, keys in groups:
         img = np.full((per, w, 3), 14, np.uint8)
         T, B = 3, 3
         ph = per - T - B
@@ -158,14 +167,14 @@ def draw_motion(w, h, now, span, t, regions, highlight, marks, floor=0.15):
         for r, v in zip(keys, vals):
             if r in highlight:
                 _polyline(img, ax, Y, tt, v, HILITE, 4)
-                _polyline(img, ax, Y, tt, v, REGION_COLORS.get(r, TXT), 2)
+                _polyline(img, ax, Y, tt, v, cmap.get(r, TXT), 2)
             else:
-                _polyline(img, ax, Y, tt, v, tuple(int(c * 0.6) for c in REGION_COLORS.get(r, TXT)), 1)
+                _polyline(img, ax, Y, tt, v, tuple(int(c * 0.6) for c in cmap.get(r, TXT)), 1)
         put_text(img, title, (4, 2), FS, HILITE if hl else TXT, bold=hl, anchor="lt")
         ly = 9
         for r in keys:
-            col = HILITE if r in highlight else _light(REGION_COLORS.get(r, TXT))
-            cv2.line(img, (w - R_M + 4, ly), (w - R_M + 14, ly), REGION_COLORS.get(r, TXT), 2)
+            col = HILITE if r in highlight else _light(cmap.get(r, TXT))
+            cv2.line(img, (w - R_M + 4, ly), (w - R_M + 14, ly), cmap.get(r, TXT), 2)
             put_text(img, SHORT[r] + (" *" if r in highlight else ""), (w - R_M + 18, ly), FS, col, anchor="lm")
             ly += 16
         cv2.line(img, (0, per - 1), (w, per - 1), GRID, 1)
@@ -173,7 +182,8 @@ def draw_motion(w, h, now, span, t, regions, highlight, marks, floor=0.15):
     out = np.vstack(strips)
     if out.shape[0] < h:
         out = np.vstack([out, np.full((h - out.shape[0], w, 3), 14, np.uint8)])
-    hdr = "Motion (speed, body-size/s" + ("; * = top driver)" if highlight else ")")
+    if hdr is None:
+        hdr = "Motion (speed, body-size/s" + ("; * = top driver)" if highlight else ")")
     put_text(out, hdr, (w - R_M - 6, 2), FS, (130, 130, 130), anchor="rt")
     return out
 
@@ -193,14 +203,22 @@ def draw_eeg_lane(w, h, enabled=False, ts=None, vs=None, now=0.0, span=90.0):
     return img
 
 
-def compose_panel(w, h, prob, drivers, motion, eeg):
-    out = np.vstack([prob, drivers, motion, eeg])
+def compose_panel(w, h, prob, drivers, motion, eeg, face=None):
+    out = np.vstack([prob, drivers, motion] + ([face] if face is not None else []) + [eeg])
     if out.shape[0] < h:
         out = np.vstack([out, np.full((h - out.shape[0], w, 3), 14, np.uint8)])
     return out[:h]
 
 
 PANEL_H = dict(prob=170, drivers=96, eeg=26)
+
+
+def split_motion(hm, face_on):
+    """Heights (body motion, face motion) inside the motion area; face motion 0 when off."""
+    if not face_on:
+        return hm, 0
+    hf = max(90, int(hm * 0.4))
+    return hm - hf, hf
 
 
 def layout(h):
