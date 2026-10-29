@@ -31,3 +31,9 @@ One figure is included: docs/figures/face_deid_grid_lwwy7p_fill_mosaic_blur.png,
   arranged and captioned. Licensed CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/), not MIT.
 Face-check models (YuNet, MIT; SFace, Apache-2.0; OpenCV Zoo) and face-swap code and weights are fetched by
 the user and not included; licences in docs/FACE_SWAP_LICENCES.md.
+src/face_ov/ (optional OpenVINO face backend) re-implements in Python the MediaPipe Face Landmarker
+graph and calculators (anchors, detection decoding, weighted NMS, rect transforms, landmark projection,
+One Euro smoothing). No MediaPipe source is copied; constants (anchor options, rect scales, landmark
+indices including the 146-index blendshape subset, filter settings) are taken from
+https://github.com/google-ai-edge/mediapipe, Copyright The MediaPipe Authors, Apache License 2.0.
+Each function names the MediaPipe file it follows; see docs/FACE_OPENVINO.md.

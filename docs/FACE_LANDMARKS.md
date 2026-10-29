@@ -35,7 +35,8 @@ its signals are not fed to either detector.
 
 **Where it runs.** MediaPipe runs its bundled TFLite models on its own CPU runtime (TFLite +
 XNNPACK). It does not use OpenVINO or ONNX Runtime, so with `--device gpu` the body and hand models
-run on the Intel iGPU while the face stage runs on the CPU.
+run on the Intel iGPU while the face stage runs on the CPU. `--face-backend openvino --face-device
+CPU|GPU|NPU|AUTO` runs the same three models with OpenVINO instead; see docs/FACE_OPENVINO.md.
 
 ## Setup
 
