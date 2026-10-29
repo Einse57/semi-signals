@@ -1,0 +1,19 @@
+{
+ "schema": "semi-signals.labels/1",
+ "mode": "body",
+ "title": "Body / Hands",
+ "timing_fields": ["clinical_onset_s", "clinical_end_s", "eeg_onset_s"],
+ "event_class": ["seizure", "possible_seizure", "non_epileptic_event"],
+ "term": {
+  "field": "seizure_type",
+  "tier": "ILAE2017_type",
+  "prompt": "Seizure type",
+  "source": "ILAE 2017 operational classification (short forms)",
+  "choices": ["focal aware motor", "focal impaired awareness motor", "focal non-motor",
+              "focal to bilateral tonic-clonic", "generalized tonic-clonic", "generalized motor (other)",
+              "generalized non-motor (absence)", "unknown onset motor", "unknown onset non-motor",
+              "unclassified"]
+ },
+ "side": [],
+ "note": true
+}

@@ -1,0 +1,16 @@
+{
+ "schema": "semi-signals.labels/1",
+ "mode": "face",
+ "title": "Face",
+ "timing_fields": ["clinical_onset_s", "clinical_end_s", "eeg_onset_s"],
+ "event_class": [],
+ "term": {
+  "field": "face_term",
+  "tier": "Face_term",
+  "prompt": "Face term",
+  "source": "",
+  "choices": []
+ },
+ "side": ["L", "R", "both"],
+ "note": true
+}
