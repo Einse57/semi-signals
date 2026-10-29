@@ -1,4 +1,4 @@
-# Face swap: licence audit (phases 1 and 2)
+# Face swap: licence audit (phases 1 to 3)
 
 Audit of GHOST (<https://github.com/ai-forever/ghost>, commit `44e58aa`, 2025-02-25) and everything it
 needs, done before any weights were downloaded or run. Read from the source repository, its release
@@ -8,6 +8,10 @@ advice.
 Verdict rules: no licence or unknown = **off-limits**; non-commercial = **excluded**; GPL, research-only
 or conflicting statements = **flagged**; Apache-2.0 / MIT / BSD / CC-BY = **OK**. Only OK items may be
 downloaded or run. `src/deid_swap.py` refuses a configuration without `"licence_reviewed": true`.
+
+Phase 3 (decision of 2026-10-28): research-use-only and non-commercial models may be used for face
+de-identification measurements in this project, locally only. See "Phase 3" below. The verdicts in the
+phase 1 and 2 sections are unchanged as statements of the published terms.
 
 ## GHOST code
 
@@ -70,7 +74,8 @@ automatically or manually." The README also directs licensing of the open recogn
 The code is usable. No GHOST weight file is usable: the generator and discriminator have no licence and
 were trained on non-commercial data, and every detector, landmark and identity model it loads is an
 InsightFace non-commercial model. Using GHOST would need a generator retrained on licensed data with a
-permissively licensed identity encoder, or written permission from the rights holders.
+permissively licensed identity encoder, or written permission from the rights holders. Phase 3 uses the
+generator and identity encoder locally under the research-use-only decision; see "Phase 3".
 
 ## Substitutes
 
@@ -103,7 +108,8 @@ Proposed: YuNet or MediaPipe for detection, SFace for the identity-similarity pa
 | FaceFusion | [facefusion/facefusion](https://github.com/facefusion/facefusion) | OpenRAIL-AS (use restrictions); default models include InsightFace inswapper | **excluded** (models) / **flagged** (licence) |
 | InsightFace inswapper | InsightFace | licensing by email only | **excluded** |
 
-Phase 2 outcome: (1) landmark-driven warp implemented; (2) LivePortrait not used (verdict below).
+Phase 2 outcome: (1) landmark-driven warp implemented; (2) LivePortrait not used (verdict below). Phase 3: GHOST and
+LivePortrait run locally, research use only.
 
 ### Donor faces
 
@@ -166,7 +172,8 @@ Phase 2 outcome: (1) landmark-driven warp implemented; (2) LivePortrait not used
 Verdict against the project rules: LivePortrait as distributed is **excluded** (bundled InsightFace
 detection and landmark models are non-commercial). With those replaced by MediaPipe/YuNet, the remaining
 human-mode weights are still **flagged** (NC and private training data, undocumented `landmark.onnx`) and
-parts of the code are **flagged** (SPADE and face vid2vid derivations). Not used.
+parts of the code are **flagged** (SPADE and face vid2vid derivations). Not used in phase 2; used locally in
+phase 3 under the research-use-only decision.
 
 ## Phase 2: warp backend and measurements (2026-10-28)
 
@@ -204,7 +211,7 @@ de-identify by this measure; donor geometry lowers similarity but 9 % (GRID) and
 are still at or above the threshold. Similarity of the aligned crop at the original face position with the
 face filled is 0.30 on average (GRID), so values near 0.3 also reflect hair, outline and background. On
 Intel, faces the landmarker misses are left untouched by every method (19 fill frames). Hardware for an
-Intel iGPU run is still pending.
+Intel iGPU run is still pending. Phase 3 adds ArcFace for these methods (see "Phase 3").
 
 ## Phase 2: identity check models
 
@@ -214,11 +221,134 @@ Intel iGPU run is still pending.
 - `canonical_face_model.obj` (MediaPipe, Apache-2.0), commit a908d668c730da128dfa8d9f6bd25d519d006692, same step.
 - OpenCV's SFace example treats cosine similarity >= 0.363 (or normalised L2 <= 1.128) as the same identity.
 
+## Phase 3: research-use-only face swap (2026-10-28)
+
+Decision (project owner, 2026-10-28): research-only and non-commercial models may be used for semi-signals
+face de-identification only, under these conditions:
+
+- local use only; weights are never committed or redistributed;
+- every weight is fetched with a pinned sha256;
+- third-party code stays outside the repository (git-ignored `third_party_local/`); the repository holds
+  only adapter code behind the existing `FaceSwapper` interface and configuration gate;
+- the GHOST generator weights have no licence: they are treated as research use only, the gap is recorded
+  here, and they are kept off anything public.
+
+**Swap mode note: `warp`, `ghost` and `liveportrait` outputs are "reduced risk, not de-identified".**
+`ghost` and `liveportrait` are **research use only**: their configuration must set
+`"research_use_acknowledged": true`, their sidecars carry `ResearchUseOnly: true`, and their outputs stay
+local. `fill` stays the default and the only mode treated as shareable.
+
+### Third-party code (local checkouts, not in this repository)
+
+| Code | Commit | Licence | Parts used |
+|---|---|---|---|
+| [ai-forever/ghost](https://github.com/ai-forever/ghost) | `44e58aad8600ee83ad4c8213aaa9698ccaf66c1c` | Apache-2.0 | `network/AEI_Net.py`, `network/AADLayer.py`, `network/resnet.py`. Not imported: SPADE super-resolution code (CC BY-NC-SA 4.0), MXNet landmark code, InsightFace detector wrappers, `inference.py` |
+| [KlingTeam/LivePortrait](https://github.com/KlingTeam/LivePortrait) | `9b294b3d0536135442ea73cb01e6cb3ca7029dd3` | MIT with NC-derived parts (flagged above: SPADE decoder, face vid2vid modules) | `live_portrait_wrapper.py`, `modules/` (including the flagged SPADE decoder and warping modules), `config/`, `utils/crop.py`, `utils/camera.py`. Not imported: InsightFace face analysis, `landmark.onnx` runner, X-Pose, animal mode |
+| insightface 0.2.1 (PyPI wheel, extracted) | - | MIT (code) | `utils/face_align.py` read for the 5-point template; the adapter carries its own copy of the template constants and a test checks the alignment maps the template onto itself |
+
+### Weights (local, pinned sha256, never committed)
+
+GitHub release assets publish no digest, so the GHOST pins were recorded on first download (2026-10-28)
+and are checked on every re-fetch. The LivePortrait pins are the Hugging Face LFS sha256 at revision
+`82a4fa6735ca58432b6ce39301b4b9ee066dea47`.
+
+| File | Source | sha256 | Licence | Status |
+|---|---|---|---|---|
+| `G_unet_2blocks.pth` (GHOST generator) | release `sber-swap-v2.0` | `85f130421c65722927c47502ea1b28b62be4893ca9180fec735b67be1e5edd8d` | **none stated** (gap); trained on VGGFace2 (non-commercial research) | used, research use only, kept off anything public |
+| `backbone.pth` + `iresnet.py` (ArcFace iResNet-100, GHOST source identity) | release `arcface` | `a566a62357f0c55b679d9ff2f022a294486568be0c00665d39029d0e46a8109b`, `990006bfcd6583bdc9775045dfe02cbb10904018c0c34825f05d9cdd834fd388` | InsightFace: non-commercial research only | used, research use only |
+| `glintr100.onnx` (InsightFace antelope recognition model) | release `antelope` | `4ab1d6435d639628a6f3e5008dd4f929edf4c4124b1a7169e1048f9fef534cdf` | InsightFace: non-commercial research only | used as the ArcFace scorer in the check harness only, research use only |
+| `liveportrait/base_models/appearance_feature_extractor.pth` | HF KlingTeam/LivePortrait | `5279bb8654293dbdf327030b397f107237dd9212fb11dd75b83dfb635211ceb5` | `license:mit` tag; training data flagged (NC and private sets) | used, research use only |
+| `liveportrait/base_models/motion_extractor.pth` | same | `251e6a94ad667a1d0c69526d292677165110ef7f0cf0f6d199f0e414e8aa0ca5` | same | used, research use only |
+| `liveportrait/base_models/spade_generator.pth` | same | `4780afc7909a9f84e24c01d73b31a555ef651521a1fe3b2429bd04534d992aee` | same | used, research use only |
+| `liveportrait/base_models/warping_module.pth` | same | `2f61a6f265fe344f14132364859a78bdbbc2068577170693da57fb96d636e282` | same | used, research use only |
+| `liveportrait/retargeting_models/stitching_retargeting_module.pth` | same | `3652d5a3f95099141a56986aaddec92fadf0a73c87a20fac9a2c07c32b28b611` | same | used, research use only |
+| `liveportrait/landmark.onnx` | same | `31d22a5041326c31f19b78886939a634a5aedcaa5ab8b9b951a1167595d147db` | unknown provenance (flagged) | fetched, not loaded |
+| `insightface/models/buffalo_l/det_10g.onnx`, `2d106det.onnx` | same | `5838f7fe053675b1c7a08b633df49e7af5495cee0493c7dcf6697200b85b5b91`, `f001b856447c413801ef5c42091ed0cd516fcd21f2d6b79635b1e733a7109dbf` | InsightFace: non-commercial research only | fetched, not loaded |
+
+Not fetched: GHOST discriminators, v1 generator, SCRFD detectors, MXNet `2d106det`, AWL eye landmarks,
+super-resolution `10_net_G.pth`; LivePortrait animal and X-Pose weights. Detection and landmarks in both
+adapters come from MediaPipe (Apache-2.0).
+
+### Adapters
+
+- `ghost` (`src/deid_ghost.py`): MediaPipe 5 points (eye centres, nose tip, mouth corners) aligned to the
+  InsightFace 0.2.1 template at 224 px; AEI-Net (U-Net, 2 AAD blocks, float32, CPU) at 256 px; source
+  identity from `backbone.pth` on the donor; result warped back and blended over the MediaPipe face hull
+  (eroded and feathered). No super resolution.
+- `liveportrait` (`src/deid_liveportrait.py`): the donor image is the source; the subject's video drives
+  it. Crops use LivePortrait's own `crop_image` with MediaPipe 5 points. Motion is relative to the first
+  frame of each face track (rotation, expression, scale, translation), then stitching and decoding at
+  512 px. The animated face is aligned back to the subject's landmarks (Umeyama) and blended over the
+  MediaPipe face hull. Frames where the animated face has no landmarks reuse the last alignment.
+- Donors: the procedural mesh donors (`src/deid_warp.render_donor`, Apache-2.0 mesh, no photograph). No
+  real person's photo or unlicensed face image is used. FLUX donors are on hold.
+
+### ArcFace scorer and threshold
+
+`deid_check.ArcFaceEmbedder` (`backend: "arcface"`) runs `glintr100.onnx` on CPU on YuNet detections aligned
+to the ArcFace 112 px template. InsightFace publishes no single same-identity threshold; its model guide
+puts 1:1 verification thresholds for its recognition packs at cosine 0.30-0.45 (false-match rate 1e-4 to
+1e-5). The harness uses 0.30, the low end, so more pairs count as the same person, and also reports the
+share at or above 0.45. Checks on this machine: the same GRID speaker (s14) in two clips 0.89; s14 against
+the two Intel clips' people 0.01 and 0.03. The SFace threshold stays 0.363.
+
+### Measurements
+
+| Method | Clips | MediaPipe hit | YuNet hit | SFace mean (n; share >= 0.363) | ArcFace mean (n; share >= 0.30; share >= 0.45) | Landmark r | Blendshape r | ms/frame |
+|---|---|---|---|---|---|---|---|---|
+| original (landmarks: ms/frame) | GRID (4 clips, 300 frames) | 100 % | 100 % | - | - | - | - | 42.8 |
+| fill | GRID | 0 % | 0 % | no face (n 0) | no face (n 0) | (0 frames) | (0 frames) | 1.3 |
+| blur | GRID | 49 % | 100 % | 0.07 (300; 0 %) | 0.18 (300; 0 %; 0 %) | 0.03 | -0.02 | 5.2 |
+| warp, donor geometry | GRID | 100 % | 100 % | 0.31 (300; 8.7 %) | 0.18 (300; 0 %; 0 %) | 0.78 | 0.68 | 12.0 |
+| warp, subject geometry | GRID | 100 % | 100 % | 0.46 (300; 100 %) | 0.32 (300; 82 %; 0 %) | 0.82 | 0.74 | 10.3 |
+| ghost (mesh donor) | GRID | 100 % | 100 % | 0.36 (300; 43 %) | 0.13 (300; 0 %; 0 %) | 0.78 | 0.68 | 356.8 |
+| liveportrait (mesh donor) | GRID | 100 % | 100 % | 0.27 (300; 1.7 %) | 0.13 (300; 0 %; 0 %) | 0.14 | 0.02 | 1798.2 |
+| original (landmarks: ms/frame) | Intel (1 clips, 1091 frames) | 42 % | 59 % | - | - | - | - | 37.6 |
+| fill | Intel | 0 % | 0.5 % | 0.81 (5; 100 %) | 0.79 (5; 100 %; 100 %) | (0 frames) | (0 frames) | 4.3 |
+| blur | Intel | 0 % | 7.8 % | 0.20 (87; 5.7 %) | 0.09 (87; 5.7 %; 5.7 %) | (8 frames) | (8 frames) | 8.5 |
+| warp, donor geometry | Intel | 43 % | 44 % | 0.20 (778; 0.6 %) | 0.15 (778; 1.9 %; 0.6 %) | 0.63 | 0.23 | 9.1 |
+| warp, subject geometry | Intel | 43 % | 44 % | 0.28 (778; 17 %) | 0.23 (778; 17 %; 0.6 %) | 0.55 | 0.30 | 8.5 |
+| ghost (mesh donor) | Intel | 43 % | 44 % | 0.26 (778; 6.2 %) | 0.14 (778; 1.4 %; 0.6 %) | 0.50 | 0.20 | 253.3 |
+| liveportrait (mesh donor) | Intel | 38 % | 43 % | 0.12 (627; 3.0 %) | 0.05 (627; 1.0 %; 0.8 %) | 0.15 | 0.01 | 1285.8 |
+
+Measured on the working machine (shared VM, 8 vCPU "Intel(R) Xeon(R) Processor", 15.6 GB RAM, no GPU,
+torch 2.15.0+cpu with 8 threads, onnxruntime 1.31.1, OpenCV 5.0.0) on GRID s14 clips bbad9n, bbae1p, bbae2a,
+lwwy7p and the Intel sample clips listed in the Clips column. Donor: procedural mesh donor, seed 2. Columns
+as in the phase 2 table; fill, blur and warp rows are the phase 2 renders of the same clips. ArcFace =
+`glintr100.onnx` cosine similarity, original face vs the face YuNet finds at the same place in the output
+(n = face pairs), thresholds 0.30 and 0.45. ms/frame = the method only; the landmark stage is listed on the
+"original" row. Frames where the subject's face is not found are filled whole-frame by every method.
+
+Intel: only face-demographics-walking-and-pause (1091 frames) is scored so far; head-pose-face-detection-female-and-male is still rendering and will be added.
+
+Observations:
+
+- `ghost` with the mesh donor: on GRID 43 % of face pairs are at or above the SFace threshold and none at
+  or above the ArcFace 0.30 threshold. In the stills the output keeps the subject's face shape, hair line and
+  skin, with the eyes rendered closed or blank. The mesh donor is not photographic, so the identity code
+  GHOST takes from it carries little face detail. This is reported as a donor failure for `ghost`.
+- `liveportrait` with the mesh donor: the output shows the stylised donor face; the mouth moves. Landmark r
+  0.14 and blendshape r 0.02 (GRID): the animated face's motion follows the subject's only weakly.
+- SFace and ArcFace give different shares for the same outputs (for example warp with subject geometry on
+  GRID: SFace 100 % at or above 0.363, ArcFace 82 % at or above 0.30 and 0 % at or above 0.45).
+- All `warp`, `ghost` and `liveportrait` outputs are **reduced risk, not de-identified**.
+
 ## What is in this repository
 
 - `src/deid_swap.py`: `FaceSwapper` protocol, backend registry, configuration checks (licence flag, model
-  files, donor and donor licence), `GhostSwapper` placeholder that refuses to load, `warp` backend.
+  files, donor and donor licence, `research_use_acknowledged` for `ghost` and `liveportrait`), lazy loaders
+  for `warp`, `ghost` and `liveportrait`, and the status string "reduced risk, not de-identified".
 - `src/deid_warp.py`: mesh loader, procedural donor renderer, `WarpSwapper`.
+- `src/deid_ghost.py`: `GhostSwapper`, a CPU adapter that loads GHOST's code and weights from a local
+  checkout outside the repository (research use only).
+- `src/deid_liveportrait.py`: `LivePortraitSwapper`, a CPU adapter that loads LivePortrait's code and
+  weights from a local checkout outside the repository (research use only).
 - `src/deid_check.py`: check harness. Detector hit rate (MediaPipe; YuNet with `--yunet`), identity
-  similarity (SFace on YuNet detections), landmark-region and blendshape motion correlation.
-- No weights, donor images or downloads; `scripts/fetch_models.py --face-check` fetches the files above.
+  similarity (SFace on YuNet detections; ArcFace with a research-use-only InsightFace model), landmark-region
+  and blendshape motion correlation.
+- `src/segment_export.py`: swap sidecars carry `Deidentified: false`, `DeidentificationStatus: "reduced
+  risk, not de-identified"` and, for `ghost` and `liveportrait`, `ResearchUseOnly: true`. `fill` stays the
+  default and the only mode treated as shareable.
+- No third-party code, weights, donor images or downloads. `scripts/fetch_models.py --face-check` fetches the
+  phase 2 files above; the phase 3 code and weights live in a git-ignored `third_party_local/` directory
+  outside the repository.
