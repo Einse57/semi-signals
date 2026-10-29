@@ -28,3 +28,4 @@ matplotlib>=3.7.0
 
 # Utilities
 tqdm>=4.65.0
+# mediapipe>=0.10.14  # optional: face landmarks (--face); pip install mediapipe

@@ -10,3 +10,4 @@ scipy>=1.11
 pandas>=2.0
 openpyxl>=3.1
 pillow>=9.2   # anti-aliased TrueType text (src/textdraw.py); falls back to the OpenCV font without it
+# mediapipe>=0.10.14  # optional: face landmarks (--face); pip install mediapipe
