@@ -25,7 +25,8 @@ RESEARCH_LINE = "Research use only, not diagnostic. Video stays on this computer
 SKIP_SUFFIXES = ("_semisignals.mp4", "_rendered.mp4")
 CONSENT = {"self": "I recorded this video myself", "public": "Public dataset clip",
            "consented": "Recorded with documented consent", "unknown": "Not sure"}
-VIEWER_KEYS_TEXT = "Viewer:      q quit   space pause/play   f fast/real time   r replay   o open another video   h hide keys"
+VIEWER_KEYS_TEXT = ("Viewer:      q quit   space pause/play   f fast/real time   r replay   o open another video   "
+                    "m face on/off   h hide keys")
 REVIEW_KEYS_TEXT = ("Annotation:  o onset   e end   g EEG onset   t type   n note   x exclude start/stop   u undo\n"
                     "             space pause   j / l  -5 s / +5 s   r replay   s save now   h hide keys   q quit\n"
                     "             (the same actions are buttons in the panel next to the video; every change autosaves)")
@@ -124,6 +125,8 @@ def viewer_cmd(s: dict, data_dir: Path, models_dir: Path, extra: list[str] = ())
         cmd.append("--no-hands")
     if not s.get("explain", True):
         cmd.append("--no-explain")
+    if s.get("face"):
+        cmd.append("--face")
     return cmd + list(extra)
 
 
@@ -150,12 +153,20 @@ def has_torch() -> bool:
     return importlib.util.find_spec("torch") is not None
 
 
-def fetch_cmd(data_dir: Path, models_dir: Path, vsvig: bool | None = None) -> list[str]:
-    """VSViG is optional and its conversion needs torch; skip it when torch is not installed."""
+def has_mediapipe() -> bool:
+    import importlib.util
+    return importlib.util.find_spec("mediapipe") is not None
+
+
+def fetch_cmd(data_dir: Path, models_dir: Path, vsvig: bool | None = None, face: bool = False) -> list[str]:
+    """VSViG is optional and its conversion needs torch; skip it when torch is not installed.
+    face: also fetch the optional MediaPipe face model."""
     cmd = [sys.executable, "-u", str(ROOT / "scripts" / "fetch_models.py"),
            "--models-dir", str(models_dir), "--data-dir", str(data_dir)]
     if not (has_torch() if vsvig is None else vsvig):
         cmd.append("--skip-vsvig")
+    if face:
+        cmd.append("--face")
     return cmd
 
 
@@ -257,6 +268,9 @@ class Launcher:
         ttk.Checkbutton(opt, text="Explanations", variable=self.explain).grid(row=1, column=3, sticky="w", padx=6, pady=(6, 0))
         self.vsvig_cb = ttk.Checkbutton(opt, text="VSViG (reference model)", variable=self.vsvig)
         self.vsvig_cb.grid(row=1, column=4, sticky="w", padx=6, pady=(6, 0))
+        self.face = tk.BooleanVar(value=st.get("face", False))
+        self.face_cb = ttk.Checkbutton(opt, text="Face (MediaPipe)", variable=self.face)
+        self.face_cb.grid(row=1, column=5, sticky="w", padx=6, pady=(6, 0))
         ttk.Label(opt, text="Annotator initials").grid(row=2, column=0, sticky="w", pady=(6, 0))
         self.annotator = tk.StringVar(value=st.get("annotator", ""))
         ttk.Entry(opt, textvariable=self.annotator, width=8).grid(row=2, column=1, sticky="w", padx=6, pady=(6, 0))
@@ -314,7 +328,7 @@ class Launcher:
     # state
     def settings(self) -> dict:
         return dict(video=self.video.get().strip(), labels=self.labels.get().strip(), device=self.device.get() or "GPU",
-                    loop=self.loop.get(), hands=self.hands.get(), explain=self.explain.get(),
+                    loop=self.loop.get(), hands=self.hands.get(), explain=self.explain.get(), face=self.face.get(),
                     vsvig=self.vsvig.get() and (self.models_dir / "vsvig_base.xml").exists(),
                     annotator=self.annotator.get(), pat_id=self.pat_id.get(), proxy=self.proxy.get(),
                     consent=next((k for k, v in CONSENT.items() if v == self.consent.get()), ""))
@@ -413,7 +427,7 @@ class Launcher:
     def fetch(self):
         if not has_torch():
             self.write("Note: VSViG (optional reference model) is skipped because torch is not installed.\n")
-        self.run("fetch", fetch_cmd(self.data_dir, self.models_dir), self.settings())
+        self.run("fetch", fetch_cmd(self.data_dir, self.models_dir, face=self.face.get()), self.settings())
 
     def open_output(self):
         v = self.video.get().strip()
