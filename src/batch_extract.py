@@ -299,6 +299,8 @@ def main(argv=None) -> int:
             print(f"done {name} {json.dumps(meta)}", flush=True)
         except Exception as e:  # keep going on other videos
             print(f"FAIL {v}: {e!r}", flush=True)
+    if face is not None:
+        face.close()
     return 0
 
 

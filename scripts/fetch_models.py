@@ -91,7 +91,7 @@ FACE_CREDIT = """  MediaPipe Face Landmarker (BlazeFace short-range, Face Mesh V
 FACE_FILE = "face_landmarker.task"
 FACE_URL = ("https://storage.googleapis.com/mediapipe-models/face_landmarker/"
             "face_landmarker/float16/1/face_landmarker.task")
-FACE_SHA256: str | None = None   # TODO: pin after the first verified download (recorded in MANIFEST.json until then)
+FACE_SHA256 = "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff"
 
 
 def sha256(p: Path) -> str:

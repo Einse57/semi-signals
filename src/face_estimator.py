@@ -24,7 +24,7 @@ import numpy as np
 
 FACE_TASK_URL = ("https://storage.googleapis.com/mediapipe-models/face_landmarker/"
                  "face_landmarker/float16/1/face_landmarker.task")
-FACE_TASK_SHA256 = None          # checked by scripts/fetch_models.py (FACE_SHA256); not checked at load time
+FACE_TASK_SHA256 = "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff"  # checked by fetch_models.py
 FACE_TASK_PATH = Path(__file__).resolve().parent.parent / "models" / "face_landmarker.task"
 
 N_FACE = 478                     # 468 mesh + 10 iris landmarks
@@ -167,7 +167,10 @@ class FaceEstimator:
         self.model_path = str(path)
 
     def close(self):
-        self._lm.close()
+        """Call before the program exits (MediaPipe cannot close its graph during interpreter shutdown)."""
+        if self._lm is not None:
+            self._lm.close()
+            self._lm = None
 
     def estimate_crop(self, frame: np.ndarray, box) -> dict | None:
         """Run on one crop box; returns landmarks (478,3) in frame px, blendshapes (52,), score, bbox,
@@ -235,6 +238,10 @@ class FaceStage:
                 return False
         self.on = True
         return True
+
+    def close(self):
+        if self.est is not None:
+            self.est.close()
 
 
 def _align(src: np.ndarray, dst: np.ndarray) -> np.ndarray:

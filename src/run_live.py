@@ -229,6 +229,7 @@ def main() -> None:
 
     cap.release()
     cv2.destroyAllWindows()
+    face.close()
 
 
 if __name__ == "__main__":
