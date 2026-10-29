@@ -149,7 +149,7 @@ risk; it does not guarantee de-identification.
 ## Segment export with video (provisional)
 
 `src/segment_export.py` writes, per annotated event, a raw clip (local only), de-identified clips (face
-blur, landmarks on a blank canvas), landmarks and blendshapes in the `movement` layout, BIDS-style
+fill, landmarks on a blank canvas), landmarks and blendshapes in the `movement` layout, BIDS-style
 `events.tsv` and `scans.tsv`, and a private mapping. File layout, naming and sidecars:
 [SEGMENT_STORAGE.md](SEGMENT_STORAGE.md). The format is provisional.
 

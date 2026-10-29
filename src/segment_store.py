@@ -15,7 +15,7 @@ Layout (one BIDS-style subject folder per pseudonymous subject, one run per segm
 
 Video names follow BEP047 (bids-specification PR #2231: `beh/` datatype, `_video` suffix, optional
 `recording-` entity). BEP047 is a proposal, not part of the released BIDS specification. The `desc-`
-entity (BIDS derivatives) marks the variant: desc-raw (local only), desc-blur, desc-points.
+entity (BIDS derivatives) marks the variant: desc-raw (local only), desc-fill, desc-points, desc-ghost; desc-blur is for local review only.
 `_landmarks` / `_blendshapes` are not BIDS suffixes (there is no released BIDS pose format).
 
 Landmarks use the data layout of the `movement` toolbox (https://movement.neuroinformatics.dev,

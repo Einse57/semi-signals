@@ -22,14 +22,33 @@ def _ring(cx, cy, r=20):
 def test_blur_covers_subject_and_bystanders():
     rng = np.random.default_rng(0)
     f = rng.integers(0, 255, (120, 200, 3), np.uint8)
-    out = X.blur_face(f, _ring(50, 60), others=[_ring(150, 60)])
+    out = X.mask_faces(f, _ring(50, 60), others=[_ring(150, 60)])          # default style: fill
     assert not np.array_equal(out[60, 50], f[60, 50]) and not np.array_equal(out[60, 150], f[60, 150])
     assert np.array_equal(out[5, 100], f[5, 100])                     # outside both faces unchanged
-    fill = X.blur_face(f, _ring(50, 60), style="fill")
-    assert np.ptp(fill[50:70, 40:60].reshape(-1, 3), 0).max() == 0     # solid
-    whole = X.blur_face(f, None)                                       # no subject face: whole frame
-    assert not np.array_equal(whole[5, 100], f[5, 100])
-    assert np.array_equal(X.blur_face(f, None, missing="none"), f)
+    assert np.ptp(out[50:70, 40:60].reshape(-1, 3), 0).max() == 0      # solid
+    assert np.ptp(out[50:70, 140:160].reshape(-1, 3), 0).max() == 0    # bystander solid too
+    whole = X.mask_faces(f, None)                                      # no subject face: whole frame, one colour
+    assert np.ptp(whole.reshape(-1, 3), 0).max() == 0
+    assert np.array_equal(X.mask_faces(f, None, missing="none"), f)
+    blur = X.blur_face(f, _ring(50, 60))
+    assert not np.array_equal(blur[60, 50], f[60, 50]) and np.ptp(blur[50:70, 40:60].reshape(-1, 3), 0).max() > 0
+
+
+def test_default_variants_are_shareable():
+    a = X.parse_args(["--input", "x", "--out", "o", "--raw-root", "r"])
+    assert a.deid == "fill,points" and not a.blur_in_export
+    assert "blur" not in a.deid.split(",") and X.NOT_FOR_SHARING == ("blur",)
+
+
+def test_ghost_without_config_fails_clearly(tmp_path, monkeypatch):
+    monkeypatch.delenv("SEMI_SIGNALS_SWAP_CONFIG", raising=False)
+    v = tmp_path / "v.mp4"
+    w = cv2.VideoWriter(str(v), cv2.VideoWriter_fourcc(*"mp4v"), 10, (32, 32))
+    w.write(np.zeros((32, 32, 3), np.uint8))
+    w.release()
+    with pytest.raises(SystemExit, match="swap"):
+        X.main(["--input", str(v), "--out", str(tmp_path / "o"), "--raw-root", str(tmp_path / "r"), "--deid", "ghost"])
+    assert not (tmp_path / "o").exists()                               # nothing written
 
 
 class _Multi:
@@ -85,9 +104,10 @@ def test_end_to_end_synthetic_clip(tmp_path):
     Rp = S.SegmentPaths(raw, m[0]["sub"], "seizure", 1, "face")
     assert Rp.video("raw").exists() and not P.video("raw").exists()
     assert not list(out.rglob("*desc-raw*")) and not list(out.rglob("*mapping*"))
-    for v in ("blur", "points"):
+    for v in ("fill", "points"):
         j = S.read_json(P.video_json(v))
-        assert j["VideoFrameCount"] == 20 and j["Deidentified"] is True
+        assert j["VideoFrameCount"] == 20 and j["Deidentified"] is True and "NotForSharing" not in j
+    assert not list(out.rglob("*desc-blur*")) and not list(raw.rglob("*desc-blur*"))   # blur not by default
     d = S.read_landmarks(P.landmarks)
     assert d["landmarks"].shape == (20, 478, 3) and np.isfinite(d["landmarks"]).all()
     assert S.read_blendshapes(P.blendshapes)["blendshapes"].shape == (20, 52)
@@ -98,3 +118,25 @@ def test_end_to_end_synthetic_clip(tmp_path):
     assert all(int(r["acq_time"][:4]) <= 1925 for r in sc)
     assert S.read_scans_tsv(Rp.scans)[0]["acq_time"].startswith("2026-01-02T03:04:05.500")
     assert json.loads((out / "dataset_description.json").read_text())["DatasetType"] == "derivative"
+
+
+@pytest.mark.skipif(not (MODEL.exists() and IMG.exists()), reason="model file or test image not present")
+def test_blur_is_local_unless_requested(tmp_path):
+    img = cv2.resize(cv2.imread(str(IMG)), (320, 226))
+    video = tmp_path / "clip.mp4"
+    w = cv2.VideoWriter(str(video), cv2.VideoWriter_fourcc(*"mp4v"), 10, (320, 226))
+    for _ in range(5):
+        w.write(img)
+    w.release()
+    out, raw = tmp_path / "deid", tmp_path / "raw"
+    X.main(["--input", str(video), "--whole", "--out", str(out), "--raw-root", str(raw), "--deid", "fill,blur"])
+    assert list(raw.rglob("*desc-blur_video.mp4")) and not list(out.rglob("*desc-blur*"))
+    j = S.read_json(next(raw.rglob("*desc-blur_video.json")))
+    assert j["NotForSharing"] is True and j["Deidentified"] is False
+    scans = (next(out.rglob("*_scans.tsv"))).read_text()
+    assert "desc-fill" in scans and "desc-blur" not in scans
+    out2, raw2 = tmp_path / "deid2", tmp_path / "raw2"
+    X.main(["--input", str(video), "--whole", "--out", str(out2), "--raw-root", str(raw2), "--deid", "blur",
+            "--blur-in-export"])
+    j = S.read_json(next(out2.rglob("*desc-blur_video.json")))
+    assert j["NotForSharing"] is True

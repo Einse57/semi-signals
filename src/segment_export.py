@@ -1,7 +1,7 @@
 """Per-segment export: raw video (local only) + de-identified video + face landmarks + annotations.
 
   python -m src.segment_export --input clip.mp4 [--annotations clip.eaf] --out export/deid \\
-         --raw-root ~/semi-signals-local/raw [--face-preprocess none|detect|coco-head] [--deid blur,points]
+         --raw-root ~/semi-signals-local/raw [--face-preprocess none|detect|coco-head] [--deid fill,points]
 
 One segment per annotated event (window = clinical onset - --pre-s .. clinical end + --post-s; onset-only
 events last --default-len-s), or the whole clip with --whole / without --annotations. Per segment
@@ -11,14 +11,20 @@ events last --default-len-s), or the whole clip with --whole / without --annotat
       sub-<id>/beh/..._recording-<rec>_desc-raw_video.mp4 (+ .json), sub-<id>/sub-<id>_scans.tsv (real
       acq_time when --acq-time is given), and the private mapping CSV (segment -> source video, window,
       date shift).
+      ..._desc-blur_video.mp4 only with --deid blur: blurred faces for LOCAL REVIEW, NOT FOR SHARING
+      (a face detector still finds faces in blurred frames); it goes into the export only with
+      --blur-in-export, and is then marked NotForSharing.
   de-identified (under --out):
-      ..._desc-blur_video.mp4    face area blurred (whole frame blurred where no face was found)
-      ..._desc-points_video.mp4  landmarks drawn on a blank canvas
+      ..._desc-fill_video.mp4    (default) every face found painted with a solid colour (whole frame where
+                                 the subject's face was not found)
+      ..._desc-points_video.mp4  (default) landmarks drawn on a blank canvas
+      ..._desc-ghost_video.mp4   face swap to a donor identity (--deid ghost; scaffold, src/deid_swap.py,
+                                 needs approved models in --swap-config)
       ..._landmarks.nc (+ .json) movement-layout landmarks, ..._blendshapes.nc
       ..._events.tsv (+ .json)   from the .eaf, times relative to the segment start, no notes
       sub-<id>_scans.tsv         acq_time shifted (random per subject, year <= 1925) or n/a
-De-identified here means reduced re-identification risk, not anonymous: blur can fail on frames where
-the face is not found by the landmarker's detector in time, and landmarks can be biometric identifiers.
+De-identified here means reduced re-identification risk, not anonymous: faces the landmarker does not
+find are not masked, and landmarks can be biometric identifiers.
 """
 from __future__ import annotations
 
@@ -35,6 +41,8 @@ import numpy as np
 from src import segment_store as S
 
 REPO = Path(__file__).resolve().parent.parent
+VARIANTS = ("fill", "points", "ghost", "blur")
+NOT_FOR_SHARING = ("blur",)
 
 
 def parse_args(argv=None):
@@ -47,7 +55,13 @@ def parse_args(argv=None):
     p.add_argument("--mapping", default=None, help="private mapping CSV (default <raw-root>/private_mapping.csv)")
     p.add_argument("--face-preprocess", default="none", choices=["none", "detect", "coco-head"])
     p.add_argument("--face-model", default=None)
-    p.add_argument("--deid", default="blur,points", help="comma list of de-identified video variants: blur, points")
+    p.add_argument("--deid", default="fill,points",
+                   help="comma list of video variants: fill (default; faces painted solid), points (default; "
+                        "landmarks only), ghost (face swap; needs --swap-config), blur (LOCAL REVIEW ONLY, NOT FOR "
+                        "SHARING: written under --raw-root unless --blur-in-export)")
+    p.add_argument("--blur-in-export", action="store_true",
+                   help="put the blur variant in the export too (marked NotForSharing in its sidecar)")
+    p.add_argument("--swap-config", default=None, help="face-swap configuration JSON for --deid ghost (src/deid_swap.py)")
     p.add_argument("--mode", default="both", choices=["body", "face", "both"], help="events that make segments")
     p.add_argument("--pre-s", type=float, default=2.0)
     p.add_argument("--post-s", type=float, default=2.0)
@@ -58,26 +72,25 @@ def parse_args(argv=None):
                                                "for the same source video)")
     p.add_argument("--acq-time", default=None, help="recording start, ISO 8601 (for EEG alignment via scans.tsv)")
     p.add_argument("--hed", action="store_true", help="add an (empty) HED column for HED-SCORE tags")
-    p.add_argument("--blur-missing", default="frame", choices=["frame", "none"],
-                   help="frames without a face: blur the whole frame (default) or leave them")
-    p.add_argument("--blur-style", default="blur", choices=["blur", "fill"],
-                   help="desc-blur variant: pixelate + Gaussian blur (default) or a solid fill of the face area")
-    p.add_argument("--no-bystander-blur", action="store_true",
-                   help="blur only the subject's face (default: also blur every other face the landmarker finds)")
+    p.add_argument("--missing-face", default="frame", choices=["frame", "none"],
+                   help="fill/blur/ghost frames without the subject's face: mask the whole frame (default) or leave them")
+    p.add_argument("--no-bystanders", action="store_true",
+                   help="mask only the subject's face (default: also every other face the landmarker finds)")
     p.add_argument("--device", default="cpu", help="for --face-preprocess coco-head (body pose)")
     return p.parse_args(argv)
 
 
 # ── de-identified renders ────────────────────────────────────
-def blur_face(frame, lm, missing="frame", grow=0.25, others=(), style="blur"):
-    """Blur the convex hull (grown by `grow` x face size) of the subject's face landmarks `lm` and of
-    every other face in `others` (bystanders). No subject face: the whole frame (missing="frame")."""
+def mask_faces(frame, lm, missing="frame", grow=0.25, others=(), style="fill"):
+    """Mask the convex hull (grown by `grow` x face size) of the subject's face landmarks `lm` and of
+    every other face in `others` (bystanders): style "fill" paints it with its mean colour, "blur"
+    pixelates and blurs it (local review only). No subject face: the whole frame (missing="frame")."""
     out = frame.copy()
     h, w = frame.shape[:2]
     k = max(31, (max(h, w) // 8) | 1)
     if lm is None or not np.isfinite(lm).all():
         if missing == "frame":
-            return cv2.GaussianBlur(out, (k, k), 0)
+            return _whole(out, k, style)
         faces = list(others)
     else:
         faces = [lm] + list(others)
@@ -91,7 +104,7 @@ def blur_face(frame, lm, missing="frame", grow=0.25, others=(), style="blur"):
         size = max(size, float(max(np.ptp(p[:, 0]), np.ptp(p[:, 1]))))
         cv2.fillConvexPoly(mask, cv2.convexHull(((p - c) * (1 + grow) + c).astype(np.int32)), 255)
     if not mask.any():
-        return cv2.GaussianBlur(out, (k, k), 0)
+        return _whole(out, k, style)
     if style == "fill":                  # solid mean colour of the face area
         out[mask > 0] = out[mask > 0].reshape(-1, 3).mean(0).astype(np.uint8)
         return out
@@ -100,6 +113,17 @@ def blur_face(frame, lm, missing="frame", grow=0.25, others=(), style="blur"):
                                           interpolation=cv2.INTER_NEAREST), (kk, kk), 0)
     out[mask > 0] = blurred[mask > 0]
     return out
+
+
+def _whole(img, k, style):
+    if style == "fill":
+        return np.full_like(img, img.reshape(-1, 3).mean(0).astype(np.uint8))
+    return cv2.GaussianBlur(img, (k, k), 0)
+
+
+def blur_face(frame, lm, missing="frame", grow=0.25, others=()):
+    """Blurred faces (local review only, not for sharing)."""
+    return mask_faces(frame, lm, missing, grow, others, style="blur")
 
 
 def other_faces(multi, frame, subject_lm, max_tiles=True):
@@ -223,8 +247,17 @@ def main(argv=None):
     S.check_outside(mapping, out, "--mapping")
     variants = [v.strip() for v in a.deid.split(",") if v.strip()]
     for v in variants:
-        if v not in ("blur", "points"):
-            raise SystemExit(f"--deid: unknown variant {v!r} (blur, points)")
+        if v not in VARIANTS:
+            raise SystemExit(f"--deid: unknown variant {v!r} ({', '.join(VARIANTS)})")
+    swapper = None
+    if "ghost" in variants:
+        from src.deid_swap import SwapNotConfigured, make_swapper
+        try:
+            swapper = make_swapper(a.swap_config)
+        except SwapNotConfigured as e:
+            raise SystemExit(f"--deid ghost: {e}")
+    export_variants = [v for v in variants if v != "blur" or a.blur_in_export]
+    local_variants = [v for v in variants if v == "blur" and not a.blur_in_export]
     cap = cv2.VideoCapture(str(video))
     if not cap.isOpened():
         raise SystemExit(f"cannot open {video}")
@@ -245,7 +278,7 @@ def main(argv=None):
     run0 = max([int(r["run"]) for r in same_sub] or [0])
     est, pre, det, pose = make_preprocessor(a)
     multi = None
-    if "blur" in variants and not a.no_bystander_blur:
+    if any(v in variants for v in ("fill", "blur", "ghost")) and not a.no_bystanders:
         from src.face_estimator import FaceEstimator
         multi = FaceEstimator(model_path=a.face_model, num_faces=8, blendshapes=False)
     S.dataset_description(out, deidentified=True)
@@ -260,8 +293,10 @@ def main(argv=None):
             cap.set(cv2.CAP_PROP_POS_FRAMES, f0)
             pre.reset()
             ws = {"raw": writer(R.video("raw"), fps, (W, H))}
-            for v in variants:
+            for v in export_variants:
                 ws[v] = writer(P.video(v), fps, (W, H))
+            for v in local_variants:
+                ws[v] = writer(R.video(v), fps, (W, H))
             T, LM, BS, SC, ROLL, n_other = [], [], [], [], [], []
             for fi in range(f0, f1):
                 ok, frame = cap.read()
@@ -275,10 +310,17 @@ def main(argv=None):
                 SC.append(float(r["score"]) if r is not None else np.nan)
                 ROLL.append(float(r.get("roll_deg", np.nan)) if r is not None else np.nan)
                 ws["raw"].write(frame)
-                if "blur" in ws:
-                    oth = other_faces(multi, frame, lm) if multi is not None else []
+                oth = None
+                if multi is not None:
+                    oth = other_faces(multi, frame, lm)
                     n_other.append(len(oth))
-                    ws["blur"].write(blur_face(frame, lm, a.blur_missing, others=oth, style=a.blur_style))
+                for v in ("fill", "blur"):
+                    if v in ws:
+                        ws[v].write(mask_faces(frame, lm, a.missing_face, others=oth or [], style=v))
+                if "ghost" in ws:
+                    faces = ([lm] if lm is not None else []) + list(oth or [])
+                    g = swapper.swap(frame, faces) if (lm is not None or a.missing_face == "none") else None
+                    ws["ghost"].write(g if g is not None else mask_faces(frame, None, "frame", style="fill"))
                 if "points" in ws:
                     ws["points"].write(points_frame(frame.shape, lm))
             for w_ in ws.values():
@@ -286,18 +328,27 @@ def main(argv=None):
             found = int(np.isfinite(SC).sum())
             common = dict(Deidentified=True, AnnotationMode=",".join(sorted({e["mode"] for e in seg["events"]})) or "none",
                           FacePreprocess=a.face_preprocess, PrivateMappingRef=mapping.name, Provisional=True)
+            bys = "" if multi is None else (" and every other face the landmarker found (whole frame + 4 tiles); "
+                                            "faces it misses are not masked, check before sharing")
+            miss = ("; frames without the subject's face masked whole" if a.missing_face == "frame"
+                    else "; frames without the subject's face NOT masked")
+            descs = dict(fill="subject face area (landmark hull grown 25%)" + bys + " painted with its mean colour" + miss,
+                         blur="LOCAL REVIEW ONLY, NOT FOR SHARING: face areas pixelated and blurred; face detectors "
+                              "still find faces in blurred frames" + miss,
+                         ghost="faces replaced by a donor identity (face swap, " + (swapper.name if swapper else "-")
+                               + ")" + miss,
+                         points="face landmarks drawn on a blank canvas; no image content")
             for v in variants:
-                desc = dict(blur=("subject face area blurred (convex hull of the landmarks, grown 25%)"
-                                  + ("" if multi is None else " and every other face the landmarker found (whole frame "
-                                     "+ 4 tiles); faces it misses are NOT blurred, check before sharing")
-                                  + ("; frames without the subject's face blurred whole" if a.blur_missing == "frame"
-                                     else "; frames without the subject's face NOT blurred")),
-                            points="face landmarks drawn on a blank canvas; no image content")[v]
-                extra = dict(common, Variant=v, VariantDescription=desc, FramesWithFace=found)
-                if v == "blur":
-                    extra["BlurStyle"] = a.blur_style
-                    extra["BystanderFacesBlurred"] = int(np.sum(n_other)) if multi is not None else None
-                S.write_json(P.video_json(v), S.video_sidecar(P.video(v), extra))
+                local = v in local_variants
+                extra = dict(common, Variant=v, VariantDescription=descs[v], FramesWithFace=found)
+                if v in NOT_FOR_SHARING:
+                    extra.update(NotForSharing=True, Deidentified=False)
+                if v in ("fill", "blur", "ghost"):
+                    extra["BystanderFacesMasked"] = int(np.sum(n_other)) if multi is not None else None
+                if v == "ghost" and swapper is not None:
+                    extra["SwapBackend"] = swapper.name
+                vp = R if local else P
+                S.write_json(vp.video_json(v), S.video_sidecar(vp.video(v), extra))
             S.write_json(R.video_json("raw"), S.video_sidecar(R.video("raw"), dict(Deidentified=False, Variant="raw",
                                                                                   Provisional=True)))
             lm_path = S.write_landmarks(P.landmarks, T, np.stack(LM) if LM else np.zeros((0, 478, 3), np.float32),
@@ -319,11 +370,12 @@ def main(argv=None):
                 S.write_events_tsv(P.events, [], hed=a.hed)
                 S.write_json(P.events_json, S.events_sidecar(hed=a.hed))
             seg_acq = acq + _dt.timedelta(seconds=seg["start"]) if acq is not None else None
-            files = [P.video(v) for v in variants] + [lm_path, bs_path]
+            files = [P.video(v) for v in export_variants] + [lm_path, bs_path]
             S.write_scans_tsv(P.scans, [dict(filename=P.rel(f), acq_time=S.shift_acq_time(seg_acq, shift)
                                              if seg_acq else S.NA) for f in files])
-            S.write_scans_tsv(R.scans, [dict(filename=R.rel(R.video("raw")),
-                                             acq_time=seg_acq.isoformat(timespec="milliseconds") if seg_acq else S.NA)])
+            S.write_scans_tsv(R.scans, [dict(filename=R.rel(R.video(v)),
+                                             acq_time=seg_acq.isoformat(timespec="milliseconds") if seg_acq else S.NA)
+                                        for v in ["raw"] + local_variants])
             rows.append(dict(sub=sub, run=run, segment_start_s=round(seg["start"], 3), segment_end_s=round(seg["end"], 3),
                              source_video=str(video), source_sha256=sha,
                              annotations=str(Path(a.annotations).resolve()) if a.annotations else "",
@@ -331,12 +383,14 @@ def main(argv=None):
                              raw_video=str(R.video("raw")),
                              exported=_dt.datetime.now().astimezone().isoformat(timespec="seconds")))
             print(f"[segment] sub-{sub} run-{run:02d}: {seg['start']:.2f}-{seg['end']:.2f} s, {len(T)} frames, "
-                  f"face in {found}; {', '.join(variants)} + raw", flush=True)
+                  f"face in {found}; {', '.join(export_variants)}" + (f"; local: raw, {', '.join(local_variants)}" if local_variants else "; local: raw"), flush=True)
     finally:
         cap.release()
         est.close()
         if multi is not None:
             multi.close()
+        if swapper is not None:
+            swapper.close()
     append_mapping(mapping, rows)
     print(f"[segment] {len(rows)} segment(s); de-identified: {out}; raw (local only): {raw_root}; mapping: {mapping}")
     return 0

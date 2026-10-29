@@ -12,14 +12,15 @@ two trees:
   acquisition time, and the private mapping. It must be outside the export; inside this repository it must
   be a gitignored folder (`local/`, `raw_segments/`, `segments/`, `export/` and `*_desc-raw_video.*` are in
   `.gitignore`). Never commit or upload it.
-- **de-identified** (`--out`): blurred and landmarks-only video, landmarks, blendshapes, events, shifted
+- **de-identified** (`--out`): face-filled and landmarks-only video (by default), landmarks, blendshapes, events, shifted
   `scans.tsv`. "De-identified" here means reduced re-identification risk, not anonymous (see Limits).
 
 ```
 python -m src.segment_export --input clip.mp4 --annotations clip.eaf \
        --out export/deid --raw-root ~/semi-signals-local/raw \
        --face-preprocess detect --pre-s 2 --post-s 2 --acq-time 2026-03-04T10:11:12 [--hed] \
-       [--deid blur,points] [--blur-style blur|fill] [--blur-missing frame|none] [--no-bystander-blur]
+       [--deid fill,points] [--missing-face frame|none] [--no-bystanders] \
+       [--deid ...,ghost --swap-config swap.json] [--deid ...,blur [--blur-in-export]]
 ```
 
 ## Layout
@@ -28,7 +29,7 @@ python -m src.segment_export --input clip.mp4 --annotations clip.eaf \
 <out>/dataset_description.json                      DatasetType "derivative", BEP047 and privacy notes
 <out>/sub-<id>/sub-<id>_scans.tsv                   filename, acq_time (date-shifted, year <= 1925, or n/a)
 <out>/sub-<id>/beh/
-    sub-<id>_task-<task>_run-<NN>_recording-<rec>_desc-blur_video.mp4   (+ .json)
+    sub-<id>_task-<task>_run-<NN>_recording-<rec>_desc-fill_video.mp4   (+ .json)
     sub-<id>_task-<task>_run-<NN>_recording-<rec>_desc-points_video.mp4 (+ .json)
     sub-<id>_task-<task>_run-<NN>_recording-<rec>_landmarks.nc          (+ .json)
     sub-<id>_task-<task>_run-<NN>_recording-<rec>_blendshapes.nc
@@ -37,6 +38,7 @@ python -m src.segment_export --input clip.mp4 --annotations clip.eaf \
 <raw-root>/private_mapping.csv
 <raw-root>/sub-<id>/sub-<id>_scans.tsv              real acq_time
 <raw-root>/sub-<id>/beh/..._recording-<rec>_desc-raw_video.mp4          (+ .json)
+<raw-root>/sub-<id>/beh/..._recording-<rec>_desc-blur_video.mp4         (+ .json; only with --deid blur)
 ```
 
 - `sub-<id>`: random pseudonym (8 hex characters), reused for the same source video (same SHA-256) through
@@ -105,11 +107,14 @@ in the private mapping.
 | `desc` | Tree | Content |
 |---|---|---|
 | `raw` | raw only | the source frames of the segment |
-| `blur` | export | face areas blurred: the subject's landmark hull grown by 25 %, plus every other face the landmarker finds (whole frame + four tiles; `--no-bystander-blur` turns this off). `--blur-style fill` paints the areas with their mean colour instead. Frames without the subject's face are blurred whole (`--blur-missing frame`, default) |
+| `fill` | export (default) | face areas painted with their mean colour: the subject's landmark hull grown by 25 %, plus every other face the landmarker finds (whole frame + four tiles; `--no-bystanders` turns this off). Frames without the subject's face are filled whole (`--missing-face frame`, default) |
+| `ghost` | export (opt-in) | face swap to a donor identity (`--deid ghost`). Scaffold only: it needs `--swap-config` with licence-reviewed models and a licensed donor, and exits with an error otherwise. See [FACE_SWAP_LICENCES.md](FACE_SWAP_LICENCES.md) |
+| `blur` | raw only (opt-in) | **local review only, not for sharing.** Face areas pixelated and blurred. Written under `--raw-root`; `--blur-in-export` puts it in the export, with `NotForSharing: true` and `Deidentified: false` in its sidecar |
 | `points` | export | the subject's landmarks drawn on a black canvas, no image content |
 
 Each video sidecar records the variant, the number of frames with a face, the number of bystander faces
-blurred, the preprocessing mode and `Deidentified`.
+masked (`BystanderFacesMasked`), the preprocessing mode and `Deidentified`; the blur variant also has
+`NotForSharing`.
 
 ## Sidecar fields (custom)
 
@@ -125,13 +130,17 @@ outside `--out` (checked). Keep it with the source videos.
 
 ## Limits
 
-- Blur is only as good as face detection. On the test clips the landmarker still detected a face shape in
-  9-60 % of blurred frames (no detections with `--blur-style fill`); faces it never finds (small, turned
-  away, occluded) are not blurred. Check every de-identified clip before sharing.
+- Blur does not de-identify: on the test clips the landmarker still detected a face in 9-60 % of blurred
+  frames, so blur is for local review only. On the same clips it detected no face in filled frames.
+- Fill and blur only cover faces the landmarker finds; faces it never finds (small, turned away, occluded)
+  are not masked. Check every de-identified clip before sharing.
 - Landmarks, blendshapes and landmark-only video can be biometric identifiers (HIPAA, GDPR, state
   biometric laws).
 - Body, clothing, voice (if audio is added), room and timing can identify a person.
-- Face swapping (for example GHOST) as a further de-identification step is future work and not implemented.
+- Face swapping (`--deid ghost`) is a scaffold: no models are wired in. The licence audit of GHOST and its
+  models is in [FACE_SWAP_LICENCES.md](FACE_SWAP_LICENCES.md). The check harness `python -m src.deid_check`
+  reports the detector hit rate, identity similarity (pluggable embedder) and landmark and blendshape
+  motion correlation between original and de-identified clips.
 
 ## Test data used during development (not in this repository)
 

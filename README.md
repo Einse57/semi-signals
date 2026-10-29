@@ -149,10 +149,12 @@ biometric identifiers, so this reduces re-identification risk; it is not de-iden
 ### Segment export with video (provisional format)
 `python -m src.segment_export --input clip.mp4 --annotations clip.eaf --out <export> --raw-root <local raw folder>
 [--face-preprocess detect]` writes per annotated event a raw clip (kept under `--raw-root`, never in the
-export), a face-blurred clip and a landmarks-only clip, face landmarks and blendshapes (netCDF, `movement`
+export), a face-filled clip (faces painted with a solid colour) and a landmarks-only clip, face landmarks and blendshapes (netCDF, `movement`
 layout), BIDS-style `events.tsv` / `scans.tsv` and a private mapping CSV. File names follow the BIDS
 audio/video proposal BEP047, which is not part of the BIDS specification. The format is provisional and
-may change: [docs/SEGMENT_STORAGE.md](docs/SEGMENT_STORAGE.md).
+may change: [docs/SEGMENT_STORAGE.md](docs/SEGMENT_STORAGE.md). A blurred variant (`--deid blur`) is for local
+review only and is not for sharing. A face-swap variant (`--deid ghost`) is scaffolded but has no models;
+see [docs/FACE_SWAP_LICENCES.md](docs/FACE_SWAP_LICENCES.md).
 
 Model weights are not in this repository. Details: [docs/SEIZURE_DETECTION.md](docs/SEIZURE_DETECTION.md),
 [docs/detector_a_results.md](docs/detector_a_results.md),
