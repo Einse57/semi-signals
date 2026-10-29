@@ -7,6 +7,7 @@
   python scripts/fetch_models.py --clips pat12/Sz1P,pat12/Sz2P   # other sample clips (or --clips all, ~27 GB)
   python scripts/fetch_models.py --skip-data           # models only
   python scripts/fetch_models.py --face --skip-data    # also the optional MediaPipe face model
+  python scripts/fetch_models.py --face-check --skip-data --skip-vsvig   # de-identification check and warp files
 
 What it does:
 1. Pose models (YOLOX-tiny, RTMPose-m body7 and hand5): downloads them into rtmlib's own cache
@@ -24,6 +25,9 @@ What it does:
 
 5. Optional (--face): MediaPipe Face Landmarker bundle `face_landmarker.task` (Google, Apache-2.0)
    from storage.googleapis.com into --models-dir, sha256-checked. Only the optional face stage uses it.
+6. Optional (--face-check): files for the de-identification check and the warp face swap, pinned and
+   sha256-checked: YuNet face detector (OpenCV Zoo, MIT), SFace face recognizer (OpenCV Zoo, Apache-2.0)
+   and the MediaPipe canonical face mesh (Apache-2.0). See docs/FACE_SWAP_LICENCES.md.
 
 Hashes of everything in --models-dir are recorded in `<models-dir>/MANIFEST.json` (sample data under "data").
 Works on Windows, macOS and Linux. Model files are not part of the repository.
@@ -372,6 +376,37 @@ def step_face(a, md: Path, man: Manifest, status):
     print(FACE_CREDIT)
 
 
+ZOO = "https://media.githubusercontent.com/media/opencv/opencv_zoo/48b10fa505aeb51fbd127fc60a5c660040e823b7/models/"
+MP_RAW = "https://raw.githubusercontent.com/google-ai-edge/mediapipe/a908d668c730da128dfa8d9f6bd25d519d006692/"
+CHECK_FILES = {  # name: (url, sha256, licence)
+    "face_detection_yunet_2023mar.onnx": (ZOO + "face_detection_yunet/face_detection_yunet_2023mar.onnx",
+        "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4", "MIT"),
+    "face_recognition_sface_2021dec.onnx": (ZOO + "face_recognition_sface/face_recognition_sface_2021dec.onnx",
+        "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79", "Apache-2.0"),
+    "canonical_face_model.obj": (MP_RAW + "mediapipe/modules/face_geometry/data/canonical_face_model.obj",
+        "8bac80443397e113f41a8b565ea72c59390bc031d9defab289dba7bc0c54e618", "Apache-2.0"),
+}
+
+
+def step_face_check(a, md: Path, man: Manifest, status):
+    print(f"[6] de-identification check files (optional) -> {md}")
+    bad = []
+    for name, (url, want, lic) in CHECK_FILES.items():
+        dst = md / name
+        if not ok_file(dst, want) or (a.force and not a.offline):
+            if a.offline:
+                bad.append(f"{name} missing or sha256 mismatch"); continue
+            try:
+                download(url, dst)
+            except OSError as e:
+                bad.append(f"{name} download ({type(e).__name__})"); continue
+            if sha256(dst) != want:
+                dst.unlink(); bad.append(f"{name} sha256 mismatch"); continue
+        print(f"    ok  {name} ({lic})")
+        man.set(name, sha256=want, source=url, license=lic)
+    status["face-check"] = "ok" if not bad else "FAILED: " + "; ".join(bad)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--models-dir", default=str(ROOT / "models"))
@@ -384,6 +419,8 @@ def main(argv=None):
                     help=f"sample clips, comma-separated patNN/SzNP (default {DEFAULT_CLIPS}); 'all' for every video (~27 GB)")
     ap.add_argument("--data-dir", default=str(ROOT / "data"), help="where Label.xlsx and the clips go (default ./data)")
     ap.add_argument("--face", action="store_true", help="also fetch the optional MediaPipe face model")
+    ap.add_argument("--face-check", action="store_true",
+                    help="also fetch YuNet, SFace and the canonical face mesh (de-identification check and warp)")
     a = ap.parse_args(argv)
     md = Path(a.models_dir).expanduser().resolve(); md.mkdir(parents=True, exist_ok=True)
     man = Manifest(md / "MANIFEST.json")
@@ -400,6 +437,8 @@ def main(argv=None):
         step_data(a, man, status)
     if a.face:
         step_face(a, md, man, status)
+    if a.face_check:
+        step_face_check(a, md, man, status)
     man.save()
     print("\nSummary (models dir: %s)" % md)
     for k, v in status.items():
