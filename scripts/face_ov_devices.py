@@ -43,7 +43,7 @@ def main():
     ap.add_argument("--task", default=str(ROOT / "models" / "face_landmarker.task"))
     ap.add_argument("--devices", nargs="+", default=["CPU", "GPU", "NPU"])
     ap.add_argument("--json", default=None)
-    ap.add_argument("--one", nargs=2, metavar=("MODEL", "DEVICE"), help=argparse.SUPPRESS)
+    ap.add_argument("--one", nargs=3, metavar=("MODEL", "DEVICE", "LABEL"), help=argparse.SUPPRESS)
     a = ap.parse_args()
     if a.one:
         return one(a.task, *a.one)
@@ -53,61 +53,65 @@ def main():
            "names": {d: core.get_property(d, "FULL_DEVICE_NAME") for d in core.available_devices}, "models": {}}
     for name in SHAPES:
         for dev in a.devices:
-            p = subprocess.run([sys.executable, "-W", "ignore", __file__, "--task", a.task, "--one", name, dev],
-                               capture_output=True, text=True, timeout=900)
-            line = [x for x in p.stdout.splitlines() if x.startswith("{")]
-            rep = json.loads(line[-1]) if line else {}
-            if p.returncode != 0 or not line:
-                rep.setdefault(dev, {})["process"] = {"exit_code": p.returncode,
-                                                      "stderr_tail": p.stderr.strip().splitlines()[-3:]}
-            m = out["models"].setdefault(name, {k: v for k, v in rep.items() if k in ("inputs", "outputs", "ops")})
-            m[dev] = rep.get(dev, {})
-            print(name, dev, json.dumps(m[dev])[:700], flush=True)
-            Path(a.json).write_text(json.dumps(out, indent=1))
+            for label in LABELS + ("ir_cache_ms",):
+                p = subprocess.run([sys.executable, "-W", "ignore", __file__, "--task", a.task, "--one", name, dev,
+                                    label], capture_output=True, text=True, timeout=900)
+                line = [x for x in p.stdout.splitlines() if x.startswith("{")]
+                rep = json.loads(line[-1]) if line else {}
+                m = out["models"].setdefault(name, {})
+                m.update({k: v for k, v in rep.items() if k in ("inputs", "outputs", "ops")})
+                res = rep.get(dev, {}).get(label)
+                if res is None:
+                    tail = [x for x in p.stderr.strip().splitlines() if x.strip()][-2:]
+                    res = {"ok": False, "error": f"process exit code {p.returncode} (0x{p.returncode & 0xFFFFFFFF:08X})",
+                           "stderr_tail": tail}
+                m.setdefault(dev, {})[label] = res
+                print(name, dev, label, json.dumps(res)[:300], flush=True)
+                Path(a.json).write_text(json.dumps(out, indent=1))
 
 
-def one(task, name, dev):
+LABELS = ("as_stored", "static", "static_f32", "static_f16")
+_CFG = {"as_stored": (False, None), "static": (True, None), "static_f32": (True, "f32"), "static_f16": (True, "f16")}
+
+
+def one(task, name, dev, only):
+    """One model, one device, one configuration; prints one JSON line."""
     import openvino as ov
     core = ov.Core()
     paths = unpack_task(task)
     shape = SHAPES[name]
     rng = np.random.default_rng(0)
-    if True:
-        x = (rng.uniform(-1, 1, shape) if "detector" in name else rng.uniform(0, 1, shape) if "landmarks" in name
-             else rng.uniform(50, 300, shape)).astype(np.float32)
-        m0 = core.read_model(str(paths[name]))
-        rep = {"inputs": [f"{i.get_any_name()} {i.get_partial_shape()}" for i in m0.inputs],
-               "outputs": [f"{o.get_any_name()} {o.get_partial_shape()}" for o in m0.outputs],
-               "ops": len(m0.get_ops())}
-        ref = _run(core.compile_model(_static(core, paths[name], shape), "CPU", {"INFERENCE_PRECISION_HINT": "f32"}), x)
-        for dev in (dev,):
-            d = rep.setdefault(dev, {})
-            for label, static, hint in (("as_stored", False, None), ("static", True, None),
-                                        ("static_f32", True, "f32"), ("static_f16", True, "f16")):
-                print(json.dumps(rep), flush=True)
-                try:
-                    m = _static(core, paths[name], shape) if static else core.read_model(str(paths[name]))
+    lo, hi = (-1, 1) if "detector" in name else (0, 1) if "landmarks" in name else (50, 300)
+    x = rng.uniform(lo, hi, shape).astype(np.float32)
+    m0 = core.read_model(str(paths[name]))
+    rep = {"inputs": [f"{i.get_any_name()} {i.get_partial_shape()}" for i in m0.inputs],
+           "outputs": [f"{o.get_any_name()} {o.get_partial_shape()}" for o in m0.outputs],
+           "ops": len(m0.get_ops())}
+    ref = _run(core.compile_model(_static(core, paths[name], shape), "CPU", {"INFERENCE_PRECISION_HINT": "f32"}), x)
+    d = rep.setdefault(dev, {})
+    try:
+        if only == "ir_cache_ms":
+            with tempfile.TemporaryDirectory() as td:
+                c2 = ov.Core()
+                c2.set_property({"CACHE_DIR": td})
+                t = []
+                for _ in range(2):
                     t0 = time.perf_counter()
-                    cm = core.compile_model(m, dev, {"INFERENCE_PRECISION_HINT": hint} if hint else {})
-                    ms = (time.perf_counter() - t0) * 1e3
-                    y = _run(cm, x)
-                    prec = str(cm.get_property("INFERENCE_PRECISION_HINT")) if dev != "NPU" else "n/a"
-                    d[label] = {"ok": True, "compile_ms": round(ms, 1), "precision": prec, **_cmp(ref, y)}
-                except Exception as e:     # noqa: BLE001 - record the failure and continue
-                    d[label] = {"ok": False, "error": f"{type(e).__name__}: {str(e).splitlines()[0][:240]}"}
-            try:
-                with tempfile.TemporaryDirectory() as td:
-                    c2 = ov.Core()
-                    c2.set_property({"CACHE_DIR": td})
-                    t = []
-                    for _ in range(2):
-                        t0 = time.perf_counter()
-                        c2.compile_model(_static(c2, paths[name], shape), dev)
-                        t.append(round((time.perf_counter() - t0) * 1e3, 1))
-                    d["ir_cache_ms"] = {"first": t[0], "cached": t[1]}
-            except Exception as e:         # noqa: BLE001
-                d["ir_cache_ms"] = {"error": f"{type(e).__name__}: {str(e).splitlines()[0][:240]}"}
-        print(json.dumps(rep), flush=True)
+                    c2.compile_model(_static(c2, paths[name], shape), dev)
+                    t.append(round((time.perf_counter() - t0) * 1e3, 1))
+                d[only] = {"ok": True, "first": t[0], "cached": t[1]}
+        else:
+            static, hint = _CFG[only]
+            m = _static(core, paths[name], shape) if static else core.read_model(str(paths[name]))
+            t0 = time.perf_counter()
+            cm = core.compile_model(m, dev, {"INFERENCE_PRECISION_HINT": hint} if hint else {})
+            ms = (time.perf_counter() - t0) * 1e3
+            y = _run(cm, x)
+            prec = str(cm.get_property("INFERENCE_PRECISION_HINT")) if dev != "NPU" else "n/a"
+            d[only] = {"ok": True, "compile_ms": round(ms, 1), "precision": prec, **_cmp(ref, y)}
+    except Exception as e:     # noqa: BLE001 - record the failure
+        d[only] = {"ok": False, "error": f"{type(e).__name__}: {' '.join(str(e).split())[:400]}"}
+    print(json.dumps(rep), flush=True)
 
 
 def _static(core, path, shape):
