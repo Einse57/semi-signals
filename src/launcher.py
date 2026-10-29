@@ -27,7 +27,9 @@ CONSENT = {"self": "I recorded this video myself", "public": "Public dataset cli
            "consented": "Recorded with documented consent", "unknown": "Not sure"}
 VIEWER_KEYS_TEXT = ("Viewer:      q quit   space pause/play   f fast/real time   r replay   o open another video   "
                     "m face on/off   h hide keys")
+ANNOT_MODES = {"body": "Body/Hands", "face": "Face", "both": "Both"}
 REVIEW_KEYS_TEXT = ("Annotation:  o onset   e end   g EEG onset   t type   n note   x exclude start/stop   u undo\n"
+                    "             Face/Both mode: d side (L/R/both); Both mode: o body onset, f face onset\n"
                     "             space pause   j / l  -5 s / +5 s   r replay   s save now   h hide keys   q quit\n"
                     "             (the same actions are buttons in the panel next to the video; every change autosaves)")
 PROGRESS_RE = re.compile(r"progress (\d+)%(?: \((.*)\))?")
@@ -145,6 +147,8 @@ def annotate_cmd(s: dict, data_dir: Path, models_dir: Path, extra: list[str] = (
         cmd += ["--pat-id", s["pat_id"].strip()]
     if not s.get("hands", True):
         cmd.append("--no-hands")
+    if s.get("annot_mode", "body") in ("face", "both"):
+        cmd += ["--mode", s["annot_mode"]]
     return cmd + list(extra)
 
 
@@ -281,6 +285,12 @@ class Launcher:
         self.consent = tk.StringVar(value=CONSENT.get(st.get("consent", ""), ""))
         ttk.Combobox(opt, textvariable=self.consent, values=list(CONSENT.values()), state="readonly", width=30).grid(
             row=2, column=5, sticky="w", padx=6, pady=(6, 0))
+        ttk.Label(opt, text="Annotation mode").grid(row=4, column=0, sticky="w", pady=(6, 0))
+        self.annot_mode = tk.StringVar(value=st.get("annot_mode", "body") if st.get("annot_mode") in ANNOT_MODES else "body")
+        for i, (k, lab) in enumerate(ANNOT_MODES.items()):
+            ttk.Radiobutton(opt, text=lab, value=k, variable=self.annot_mode).grid(row=4, column=1 + i, sticky="w", padx=6, pady=(6, 0))
+        ttk.Label(opt, text="labels: labels/body.json, labels/face.json", foreground="#666").grid(
+            row=4, column=4, columnspan=2, sticky="w", pady=(6, 0))
         ttk.Label(opt, text="Proxy (optional)").grid(row=3, column=0, sticky="w", pady=(6, 0))
         self.proxy = tk.StringVar(value=st.get("proxy", ""))
         ttk.Entry(opt, textvariable=self.proxy, width=34).grid(row=3, column=1, columnspan=3, sticky="w", padx=6, pady=(6, 0))
@@ -331,6 +341,7 @@ class Launcher:
                     loop=self.loop.get(), hands=self.hands.get(), explain=self.explain.get(), face=self.face.get(),
                     vsvig=self.vsvig.get() and (self.models_dir / "vsvig_base.xml").exists(),
                     annotator=self.annotator.get(), pat_id=self.pat_id.get(), proxy=self.proxy.get(),
+                    annot_mode=self.annot_mode.get() or "body",
                     consent=next((k for k, v in CONSENT.items() if v == self.consent.get()), ""))
 
     def refresh(self):

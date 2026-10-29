@@ -2,6 +2,7 @@
 
   python -m src.review_video                       # opens a file picker
   python -m src.review_video --input my_clip.mp4 --annotator AL
+  python -m src.review_video --input my_clip.mp4 --mode face      # face events, face mesh overlay
 
 Step 1 (process): runs the seizure viewer over the file (pose + Detector A + drivers) and saves
   <stem>_semisignals.mp4 (rendered overlay), <stem>_scores.csv and <stem>_semisignals.json (what the
@@ -12,6 +13,11 @@ Step 2 (review): plays the rendered video in sync, with a timeline of model alar
          g EEG onset (optional) | t seizure type (pick list) | n note (attached to the event under the
          playhead, else a timed note) | x exclude span start/stop | u undo last mark | s save now
          r replay from the start | h show/hide the key legend | q quit
+  Modes (--mode): body (default; Body/Hands label set), face (face label set; the render adds the
+  MediaPipe face mesh, see docs/FACE_LANDMARKS.md), both (o = body onset, f = face onset). Face events
+  use the same timing keys (o/f, e, g), n note, and d side (L / R / both). The label sets come from
+  labels/body.json and labels/face.json; t opens the term list of the last event's mode and is off
+  while that list is empty. Each event stores its mode, so body and face labels stay separate.
   A control panel next to the video has the same actions as buttons, plus Open folder and Open in ELAN.
   Every change is saved straight away (autosave, atomic writes); the status shows "saved hh:mm:ss".
   At the end of the video the window stays open on the last frame (r replay, q quit).
@@ -25,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import functools
 import glob
 import os
 import subprocess
@@ -36,10 +43,18 @@ import cv2
 import numpy as np
 
 from src import annotation as A
+from src import labels as LB
 from src.run_seizure_demo import draw_end_overlay, draw_legend, LEGEND_H, RENDER_VERSION
 from src.textdraw import put_text, text_width, fit_text, make_dpi_aware, work_area
 
 WIN = "semi-signals | review & annotate"
+MODES = ("body", "face", "both")
+MODE_TITLES = {"body": "Body/Hands", "face": "Face", "both": "Body/Hands + Face"}
+
+
+def onset_keys(mode):
+    """Key -> event mode for a new event: o in body or face mode; in both mode o = body and f = face."""
+    return {"body": {"o": "body"}, "face": {"o": "face"}, "both": {"o": "body", "f": "face"}}[mode]
 BAR_H = 74
 
 
@@ -51,6 +66,8 @@ def parse_args(argv=None):
     p.add_argument("--vsvig", default="", help="optional VSViG IR for Detector B (off by default)")
     p.add_argument("--device", default="auto")
     p.add_argument("--no-hands", action="store_true")
+    p.add_argument("--mode", default="body", choices=list(MODES),
+                   help="annotation mode: body (Body/Hands labels), face (face labels, face mesh render) or both")
     p.add_argument("--annotator", default=None)
     p.add_argument("--pat-id", default=None, help="patient id or pseudonym (never a real name)")
     p.add_argument("--consent", default="self", choices=["self", "public", "consented", "unknown"])
@@ -188,8 +205,21 @@ PANEL_BUTTONS = [("Onset", "o"), ("End", "e"), ("EEG onset", "g"), ("Type...", "
                  ("Open in ELAN", "elan"), ("Show/hide keys", "h"), ("Quit", "q")]
 
 
+def panel_buttons(mode="body", face_terms=False):
+    """PANEL_BUTTONS for a mode: face/both add Side..., both adds Face onset after Onset; face mode drops
+    Type... while labels/face.json has no term list."""
+    b = list(PANEL_BUTTONS)
+    if mode == "face" and not face_terms:
+        b.remove(("Type...", "t"))
+    if mode == "both":
+        b[0:1] = [("Body onset", "o"), ("Face onset", "f")]
+    if mode in ("face", "both"):
+        b.insert(b.index(("Note...", "n")) + 1, ("Side...", "d"))
+    return b
+
+
 class ControlPanel:
-    def __init__(self, title):
+    def __init__(self, title, mode="body", face_terms=False):
         global _parent
         self.pending, self.ok = [], False
         r = _root()
@@ -206,8 +236,10 @@ class ControlPanel:
             pass
         f = ttk.Frame(w, padding=8); f.pack(fill="both")
         self.status = tk.StringVar(value="")
-        ttk.Label(f, text="Annotate", font=("Segoe UI", 11, "bold")).grid(row=0, column=0, columnspan=2, sticky="w")
-        for i, (label, code) in enumerate(PANEL_BUTTONS):
+        ttk.Label(f, text=f"Annotating: {MODE_TITLES[mode]}", font=("Segoe UI", 11, "bold")).grid(
+            row=0, column=0, columnspan=2, sticky="w")
+        buttons = panel_buttons(mode, face_terms)
+        for i, (label, code) in enumerate(buttons):
             ttk.Button(f, text=label, width=17, command=lambda c=code: self.pending.append(c)).grid(
                 row=1 + i // 2, column=i % 2, padx=2, pady=2, sticky="ew")
         try:                                       # tk scaling is pixels per point (1.333 at 96 dpi)
@@ -215,9 +247,9 @@ class ControlPanel:
         except (tk.TclError, ValueError):
             ui = 1.0
         ttk.Label(f, textvariable=self.status, foreground="#060", wraplength=int(260 * ui)).grid(
-            row=2 + len(PANEL_BUTTONS) // 2, column=0, columnspan=2, sticky="w", pady=(6, 0))
+            row=2 + len(buttons) // 2, column=0, columnspan=2, sticky="w", pady=(6, 0))
         ttk.Label(f, text="Research use only, not diagnostic.", foreground="#a33").grid(
-            row=3 + len(PANEL_BUTTONS) // 2, column=0, columnspan=2, sticky="w")
+            row=3 + len(buttons) // 2, column=0, columnspan=2, sticky="w")
         w.protocol("WM_DELETE_WINDOW", lambda: self.pending.append("q"))
         _parent, self.ok = w, True
         self.update()
@@ -275,8 +307,15 @@ def stamp_path(video):
 
 def render_settings(a):
     """What a saved render depends on; a different overlay version or setting means render again."""
-    return dict(render_version=RENDER_VERSION, detector_a=Path(a.detector_a).name if a.detector_a else "",
-                vsvig=bool(a.vsvig), hands=not a.no_hands)
+    d = dict(render_version=RENDER_VERSION, detector_a=Path(a.detector_a).name if a.detector_a else "",
+             vsvig=bool(a.vsvig), hands=not a.no_hands)
+    if wants_face(a):            # only when on, so renders made before modes existed stay fresh
+        d["face"] = True
+    return d
+
+
+def wants_face(a):
+    return getattr(a, "mode", "body") in ("face", "both")
 
 
 def write_stamp(a, video):
@@ -308,6 +347,8 @@ def process(a, video):
             "--fast", "--save", str(rendered), "--log", str(scores), "--exit-at-end"]
     if a.no_hands:
         argv.append("--no-hands")
+    if wants_face(a):
+        argv.append("--face")
     if a.headless_process or a.keys:
         argv.append("--headless")
     print("[review] processing (pose + Detector A); this takes about the length of the video")
@@ -339,7 +380,9 @@ def per_second(rows):
 
 
 def compare(events, alarms, pre=30.0, post=60.0):
-    """Per human-marked event: first model alarm within [onset-30 s, onset+60 s] and its delay."""
+    """Per human-marked body event: first model alarm within [onset-30 s, onset+60 s] and its delay.
+    Face events are not compared (Detector A is a body-motion model)."""
+    events = A.events_of(events, "body")
     res = []
     for k, e in enumerate(events, 1):
         on = e.get("clinical_onset_s")
@@ -354,13 +397,27 @@ def compare(events, alarms, pre=30.0, post=60.0):
 
 
 # ── review UI ────────────────────────────────────────────────
+def review_keys(mode="body", face_terms=False):
+    rows = [list(r) for r in REVIEW_KEYS]
+    if mode == "face" and not face_terms:
+        rows[0] = [k for k in rows[0] if k[0] != "t"]
+    if mode == "both":
+        rows[0][2:3] = [("o", "body onset"), ("f", "face onset")]
+    if mode in ("face", "both"):
+        rows[0].insert(-1, ("d", "side"))
+    return rows
+
+
 REVIEW_KEYS = [[("space", "pause"), ("j / l", "-5 s / +5 s"), ("o", "onset"), ("e", "end"), ("g", "EEG onset"),
                 ("t", "type"), ("n", "note"), ("x", "exclude start/stop")],
                [("u", "undo"), ("s", "save now"), ("r", "replay"), ("h", "hide keys"), ("q", "quit"),
                 ("", "autosave is on: every change is written immediately")]]
 
 
-def draw_bar(w, t, dur, ann, alarms, open_excl, status):
+FACE_COL = (220, 120, 230)      # BGR, face events on the timeline
+
+
+def draw_bar(w, t, dur, ann, alarms, open_excl, status, mode="body"):
     img = np.full((BAR_H, w, 3), 18, np.uint8)
     L, R, y0, y1 = 10, 10, 8, 30
     X = lambda s: int(L + (s / max(dur, 1e-6)) * (w - L - R))
@@ -371,21 +428,30 @@ def draw_bar(w, t, dur, ann, alarms, open_excl, status):
         on, end = e.get("clinical_onset_s"), e.get("clinical_end_s")
         if on is None:
             continue
-        cv2.rectangle(img, (X(on), y0 + 10), (max(X(end if end is not None else t), X(on) + 2), y1), (0, 160, 0), -1)
-        cv2.line(img, (X(on), y0), (X(on), y1), (0, 255, 0), 2)
+        face = A.event_mode(e) == "face"
+        if mode == "body" and not face:      # body-only view: full-height lane, as before modes existed
+            ya, yb = y0 + 10, y1
+        else:                                 # body lane above, face lane below
+            ya, yb = (y0 + 16, y1) if face else (y0 + 10, y0 + 15)
+        col, line = (FACE_COL, FACE_COL) if face else ((0, 160, 0), (0, 255, 0))
+        cv2.rectangle(img, (X(on), ya), (max(X(end if end is not None else t), X(on) + 2), yb), col, -1)
+        cv2.line(img, (X(on), y0), (X(on), y1), line, 2)
     for x in ann["excludes"]:
         cv2.rectangle(img, (X(x["start_s"]), y1 - 4), (X(x["end_s"]), y1), (128, 128, 128), -1)
     for n in ann["notes"]:
         cv2.circle(img, (X(n["start_s"]), y1 + 4), 3, (0, 220, 255), -1)
     cv2.line(img, (X(t), y0 - 4), (X(t), y1 + 4), (255, 255, 255), 2)
     ev = ann["events"][-1] if ann["events"] else None
-    info = f"{A.hms(t)}  |  events {len(ann['events'])}"
+    info = f"Annotating: {MODE_TITLES[mode]}  |  {A.hms(t)}  |  events {len(ann['events'])}"
     if ev:
-        info += f"  last: onset {A.hms(ev['clinical_onset_s'])} end {A.hms(ev.get('clinical_end_s')) or '-'}"
-        info += f" type '{ev.get('seizure_type') or '-'}'"
+        info += f"  last ({A.event_mode(ev)}): onset {A.hms(ev['clinical_onset_s'])} end {A.hms(ev.get('clinical_end_s')) or '-'}"
+        if A.event_mode(ev) == "face":
+            info += f" side {ev.get('side') or '-'}" + (f" term '{ev['face_term']}'" if ev.get("face_term") else "")
+        else:
+            info += f" type '{ev.get('seizure_type') or '-'}'"
     if open_excl is not None:
         info += "  |  exclude open"
-    key = "red: model alarms   green: your marks"
+    key = "red: model alarms   green: body marks" + ("   violet: face marks" if mode != "body" else "")
     kw = text_width(key, 13)
     room = w - 2 * L - kw - 24
     if room > 200:
@@ -398,16 +464,25 @@ def draw_bar(w, t, dur, ann, alarms, open_excl, status):
     return img
 
 
-def review_legend(w):
-    return np.vstack([draw_legend(w, row) for row in REVIEW_KEYS])
+def review_legend(w, mode="body"):
+    return np.vstack([draw_legend(w, row) for row in review_keys(mode, face_terms_enabled())])
 
 
-def compose(frame, t, dur, ann, alarms, open_excl, status, legend=True, at_end=False):
-    out = np.vstack([frame, draw_bar(frame.shape[1], t, dur, ann, alarms, open_excl, status)])
+@functools.lru_cache(maxsize=1)
+def face_terms_enabled():
+    """Whether labels/face.json has a term list (read once per run; the legend is drawn every frame)."""
+    try:
+        return bool(LB.load("face")["term"]["choices"])
+    except Exception:
+        return False
+
+
+def compose(frame, t, dur, ann, alarms, open_excl, status, legend=True, at_end=False, mode="body"):
+    out = np.vstack([frame, draw_bar(frame.shape[1], t, dur, ann, alarms, open_excl, status, mode)])
     if at_end:
         out = draw_end_overlay(out, "End of video:  R replay   Q quit", sub="annotation keys still work (j to step back)")
     if legend:
-        out = np.vstack([out, review_legend(out.shape[1])])
+        out = np.vstack([out, review_legend(out.shape[1], mode)])
     return out
 
 
@@ -459,13 +534,15 @@ def main(argv=None):
             show_error("Different video", f"{eaf.name} was made for a different video (sha256 does not match), "
                                           f"so it is not loaded or overwritten. Move or rename it first.\n\n{e}")
             raise SystemExit(2)
-        ann["events"] = [dict(e, eeg_onset_s=e.get("eeg_onset_s"), notes=e.get("notes", "")) for e in prev["events"]]
+        ann["events"] = [dict(e, mode=A.event_mode(e), eeg_onset_s=e.get("eeg_onset_s"), notes=e.get("notes", ""))
+                         for e in prev["events"]]
         ann["notes"] = [dict(start_s=r["start_s"], end_s=r["end_s"], text=r["value"])
                         for r in prev["tiers"].get("Notes", {}).get("rows", [])]
         ann["excludes"] = [dict(start_s=r["start_s"], end_s=r["end_s"], reason=r["value"])
                            for r in prev["tiers"].get("Exclude", {}).get("rows", [])]
         print(f"[review] loaded {len(ann['events'])} events from {eaf.name} (Model_* tiers are regenerated)")
         status = f"loaded {len(ann['events'])} event(s) from {eaf.name}"
+    labels = LB.load_all()
     model_id = Path(a.detector_a).stem
     undo, open_excl, n_saves = [], None, 0
 
@@ -492,10 +569,28 @@ def main(argv=None):
     def handle(key, t, text=None):
         """Apply one mark; returns True if the annotation changed (then it is autosaved)."""
         nonlocal open_excl
-        if key == "o":
-            ann["events"].append(dict(clinical_onset_s=round(t, 3), clinical_end_s=None, eeg_onset_s=None,
-                                      event_class="seizure", seizure_type="", notes=""))
+        new_mode = onset_keys(a.mode).get(key)
+        if new_mode == "body":
+            ann["events"].append(dict(mode="body", clinical_onset_s=round(t, 3), clinical_end_s=None, eeg_onset_s=None,
+                                      event_class=(labels["body"]["event_class"] or ["seizure"])[0], seizure_type="", notes=""))
             undo.append(("event", None))
+        elif new_mode == "face":
+            ann["events"].append(dict(mode="face", clinical_onset_s=round(t, 3), clinical_end_s=None, eeg_onset_s=None,
+                                      side=None, face_term="", notes=""))
+            undo.append(("event", None))
+        elif key == "d" and ann["events"] and A.event_mode(ann["events"][-1]) == "face":
+            ev = ann["events"][-1]
+            opts = labels["face"]["side"]
+            if not opts:
+                return False
+            s = text if text is not None else ask_choice("Side", f"Side for the face event at {A.hms(ev['clinical_onset_s'])}:",
+                                                         opts, ev.get("side") or "")
+            s = (s or "").strip() or None
+            if s is not None and s not in opts:
+                print(f"[review] side must be one of {opts}"); return False
+            if s == ev.get("side"):
+                return False
+            undo.append(("side", ev.get("side"))); ev["side"] = s
         elif key == "e" and ann["events"]:
             ev = ann["events"][-1]
             if t <= ev["clinical_onset_s"]:
@@ -506,11 +601,15 @@ def main(argv=None):
             undo.append(("eeg", ev.get("eeg_onset_s"))); ev["eeg_onset_s"] = round(t, 3)
         elif key == "t" and ann["events"]:
             ev = ann["events"][-1]
-            s = text if text is not None else ask_choice("Seizure type", f"Seizure type for the event at {A.hms(ev['clinical_onset_s'])}:",
-                                                         list(A.SEIZURE_TYPES), ev.get("seizure_type", ""))
-            if s is None or s.strip() == (ev.get("seizure_type") or ""):
+            term = labels[A.event_mode(ev)]["term"]
+            if not term["choices"]:           # no vetted list for this mode yet (labels/<mode>.json)
                 return False
-            undo.append(("type", ev.get("seizure_type"))); ev["seizure_type"] = s.strip()
+            fld = term["field"]
+            s = text if text is not None else ask_choice(term["prompt"], f"{term['prompt']} for the event at {A.hms(ev['clinical_onset_s'])}:",
+                                                         list(term["choices"]), ev.get(fld, ""))
+            if s is None or s.strip() == (ev.get(fld) or ""):
+                return False
+            undo.append(("term", (fld, ev.get(fld)))); ev[fld] = s.strip()
         elif key == "n":
             s = text if text is not None else ask("Note", f"Note at {A.hms(t)}:")
             if not s:
@@ -533,7 +632,8 @@ def main(argv=None):
             if kind == "event": ann["events"].pop()
             elif kind == "end": ann["events"][-1]["clinical_end_s"] = val
             elif kind == "eeg": ann["events"][-1]["eeg_onset_s"] = val
-            elif kind == "type": ann["events"][-1]["seizure_type"] = val
+            elif kind == "term": ann["events"][-1][val[0]] = val[1]
+            elif kind == "side": ann["events"][-1]["side"] = val
             elif kind == "evnote": val[0]["notes"] = val[1]
             elif kind == "note": ann["notes"].pop()
             elif kind == "excl": ann["excludes"].pop()
@@ -553,7 +653,7 @@ def main(argv=None):
         ok, fr = rcap.read()
         if ok:
             cv2.imwrite(str(video.with_name(video.stem + "_review_frame.png")),
-                        compose(fr, last_t, dur, ann, alarms, open_excl, status))
+                        compose(fr, last_t, dur, ann, alarms, open_excl, status, mode=a.mode))
         if not n_saves:
             save()
         report()
@@ -564,7 +664,7 @@ def main(argv=None):
     n_fr = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
     rw, rh = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 1600), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 540)
     print("[review] step 2 of 2: review window open", flush=True)
-    panel = ControlPanel(f"semi-signals | {video.name}")
+    panel = ControlPanel(f"semi-signals | {video.name}", a.mode, bool(labels["face"]["term"]["choices"]))
     legend = True
     win_w = display_width(rw, rh, panel)
     disp_h = int(round(rh * win_w / rw))
@@ -594,7 +694,7 @@ def main(argv=None):
             shown_src = frame
             shown = frame if win_w == rw else cv2.resize(frame, (win_w, disp_h), interpolation=cv2.INTER_AREA)
         cv2.imshow(WIN, compose(shown, t, dur, ann, alarms, open_excl,
-                                "end of video  |  " + status if at_end else status, legend, at_end))
+                                "end of video  |  " + status if at_end else status, legend, at_end, a.mode))
         lag = (fi - f0) / rfps - (time.perf_counter() - wall0)
         k = cv2.waitKey(30 if paused else max(1, min(15, int(lag * 1000)))) & 0xFF
         panel.update()                              # tk runs inside this loop (no second mainloop)
