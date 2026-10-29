@@ -36,12 +36,14 @@ All ONNX checkpoints are auto-downloaded by [rtmlib](https://github.com/Tau-J/rt
 | [YOLOX-tiny](https://arxiv.org/abs/2107.08430) | Person detection | 416×416 | Bounding boxes |
 | [RTMPose-m](https://arxiv.org/abs/2303.07399) body | Body pose | 256×192 crop | 17 keypoints (COCO) |
 | [RTMPose-m](https://arxiv.org/abs/2303.07399) hand | Hand pose | 256×256 crop | 21 keypoints × 2 hands |
-| [MediaPipe Face Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker) (optional, `--face`) | Face mesh + blendshapes | head crop from the body keypoints | 478 3D landmarks, 52 blendshapes |
+| [MediaPipe Face Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker) (optional, `--face`) | Face mesh + blendshapes | `--face-preprocess`: whole frame (default), detect + align, or head crop from the body keypoints | 478 3D landmarks, 52 blendshapes |
 
 The face stage is off by default. It needs `pip install mediapipe` and `python scripts/fetch_models.py --face`
 (the model file is downloaded and sha256-checked, not stored here). MediaPipe runs on its own CPU runtime
 (TFLite + XNNPACK), also when the other models run on the iGPU. Output schema, face regions and model card
-notes: [docs/FACE_LANDMARKS.md](docs/FACE_LANDMARKS.md).
+notes: [docs/FACE_LANDMARKS.md](docs/FACE_LANDMARKS.md). By default the face stage treats each frame as the face
+region (`--face-preprocess none`); for room video use `--face-preprocess coco-head` (head crop from the body
+pose) or `detect` (find, crop and align the face).
 
 ## Performance
 
@@ -143,6 +145,14 @@ with keypoints, scores, blendshapes and time relative to the clinical onset: no 
 or dates, random segment ids, and a separate private mapping file. Dense face landmarks may still be
 biometric identifiers, so this reduces re-identification risk; it is not de-identification. Details:
 [docs/FACE_LANDMARKS.md](docs/FACE_LANDMARKS.md#points-only-segment-export).
+
+### Segment export with video (provisional format)
+`python -m src.segment_export --input clip.mp4 --annotations clip.eaf --out <export> --raw-root <local raw folder>
+[--face-preprocess detect]` writes per annotated event a raw clip (kept under `--raw-root`, never in the
+export), a face-blurred clip and a landmarks-only clip, face landmarks and blendshapes (netCDF, `movement`
+layout), BIDS-style `events.tsv` / `scans.tsv` and a private mapping CSV. File names follow the BIDS
+audio/video proposal BEP047, which is not part of the BIDS specification. The format is provisional and
+may change: [docs/SEGMENT_STORAGE.md](docs/SEGMENT_STORAGE.md).
 
 Model weights are not in this repository. Details: [docs/SEIZURE_DETECTION.md](docs/SEIZURE_DETECTION.md),
 [docs/detector_a_results.md](docs/detector_a_results.md),

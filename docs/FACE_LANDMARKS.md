@@ -8,13 +8,28 @@ its signals are not fed to either detector.
 ## Pipeline
 
 1. Body pose (RTMPose-m, COCO-17) as before.
-2. Head crop from the COCO head keypoints (nose, eyes, ears with score >= 0.3), `src/face_estimator.head_crop_bbox`:
-   - centre = mean of the visible head keypoints;
-   - face width estimated from each visible keypoint pair (ear-ear = 1.0, eye-eye = 0.45, eye-ear
-     = 0.35, nose-eye = 0.28, ...; the largest estimate wins);
-   - fallback when fewer than two head keypoints are visible: 0.4 x shoulder width, else
-     0.12 x the longer side of the person box;
-   - square crop, side = 2 x face width (minimum 48 px), zero-padded past the frame edge.
+2. Face region, set by `--face-preprocess` (`src/face_preprocess.py`; same flag in the viewer, live view,
+   batch extraction, annotation tool and segment export):
+   - `none` (default): the frame is taken to be the face region already (for example a face camera or a
+     clip cropped to the face). The landmarker runs on the whole frame, padded to a square.
+   - `detect`: find, crop and align the face. The first frame (or the first after a loss) is searched on the
+     whole frame and then on four overlapping tiles (0.6 x the longer side). The face is then cut out as a
+     256 x 256 crop centred on the mesh, 1.8 x the face extent, rotated so that the outer eye corners
+     (landmarks 33 and 263) are level. The landmarks are mapped back to frame pixels. Later frames reuse the
+     previous frame's landmarks to place the crop. One face per frame; with several people this is the
+     face found first, which is not necessarily the person the body tracker selected.
+   - `coco-head`: head crop from the COCO head keypoints of the body pose (the method before this flag
+     existed; use it for room video where the face is a small part of the frame),
+     `src/face_estimator.head_crop_bbox`:
+     - centre = mean of the visible head keypoints (nose, eyes, ears with score >= 0.3);
+     - face width estimated from each visible keypoint pair (ear-ear = 1.0, eye-eye = 0.45, eye-ear
+       = 0.35, nose-eye = 0.28, ...; the largest estimate wins);
+     - fallback when fewer than two head keypoints are visible: 0.4 x shoulder width, else
+       0.12 x the longer side of the person box;
+     - square crop, side = 2 x face width (minimum 48 px), zero-padded past the frame edge.
+
+   The default changed from the head crop to `none`. Room video (for example EMU cameras) should use
+   `--face-preprocess coco-head` or `detect`. With `--face` off nothing changes.
 3. MediaPipe Face Landmarker (IMAGE mode, one face per crop): 478 3D landmarks (468 mesh + 10 iris)
    and 52 blendshape scores; optionally the facial transformation matrix.
 
@@ -68,14 +83,17 @@ F = sampled frames, P = 3 person slots (same order as `body_kpts`).
 | `face_landmarks` | (F, P, 478, 3) | float32 | x, y in frame pixels; z in pixels on the x scale, relative to the face centre (MediaPipe convention, smaller = closer to the camera). NaN = no face |
 | `face_blendshapes` | (F, P, 52) | float32 | blendshape scores 0..1, names in `meta["face"]["blendshape_names"]` (index 0 is `_neutral`). NaN = no face |
 | `face_scores` | (F, P) | float32 | 1.0 = a face passed MediaPipe's detection and presence thresholds (0.5 each); NaN = no face or no person. The Tasks API reports no per-face confidence |
-| `face_boxes` | (F, P, 4) | float32 | head crop x1, y1, x2, y2 that was used; NaN = no crop (also kept when no face was found in it) |
+| `face_boxes` | (F, P, 4) | float32 | crop x1, y1, x2, y2 that was used (axis-aligned box around the rotated crop with `detect`); NaN = no crop (with `coco-head` also kept when no face was found in it) |
+| `face_person` | (F,) | int16 | person slot that holds the face; -1 = no face. With `none` / `detect` (one face per frame) the slot is the person whose visible head keypoints are nearest to the face centre (0 when no person was found); with `coco-head` it is the tracked subject |
 | `face_transform` | (F, P, 4, 4) | float32 | only with `--face-transform`: MediaPipe's facial transformation matrix (canonical face model to the detected face, in the crop's camera frame). NaN = no face |
 
 `meta["face"]`: model name, URL, file name, runtime, schema, number of landmarks, blendshape names,
-crop method, whether the transform was saved.
+crop method, `preprocess` mode, whether the transform was saved, and `provisional: true` (the face keys
+may still change). `src/points_export.py` uses `face_person` when present.
 
 ```bash
-python -m src.batch_extract --out data/extract --face --face-transform data/pat10/Sz2P.mp4
+python -m src.batch_extract --out data/extract --face --face-transform data/pat10/Sz2P.mp4                 # frame = face
+python -m src.batch_extract --out data/extract --face --face-preprocess coco-head data/pat10/Sz2P.mp4    # room video
 ```
 
 ## Measurements
@@ -127,6 +145,13 @@ biometric identifiers under HIPAA, GDPR and state biometric laws, even without a
 `face_*` arrays like the video they came from. A points-only export (no frames, crops or thumbnails;
 optional canonical-pose normalisation and iris removal; random segment IDs) reduces re-identification
 risk; it does not guarantee de-identification.
+
+## Segment export with video (provisional)
+
+`src/segment_export.py` writes, per annotated event, a raw clip (local only), de-identified clips (face
+blur, landmarks on a blank canvas), landmarks and blendshapes in the `movement` layout, BIDS-style
+`events.tsv` and `scans.tsv`, and a private mapping. File layout, naming and sidecars:
+[SEGMENT_STORAGE.md](SEGMENT_STORAGE.md). The format is provisional.
 
 ## Points-only segment export
 

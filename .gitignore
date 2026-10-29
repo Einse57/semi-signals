@@ -29,3 +29,12 @@ demo_recordings/
 
 # Labels and sample videos (fetched by scripts/fetch_models.py)
 data/
+
+# segment export (src/segment_export.py): raw video and the private mapping stay local, never committed
+local/
+raw_segments/
+segments/
+export/
+private_mapping*.csv
+*_desc-raw_video.*
+*_semisignals.mp4

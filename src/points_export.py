@@ -35,7 +35,9 @@ from pathlib import Path
 
 import numpy as np
 
-SCHEMA = "semi-signals.points/1"
+from src import segment_store as S
+
+SCHEMA = "semi-signals.points/1"          # provisional; files are written by src/segment_store.write_points
 IRIS = slice(468, 478)
 EYE_OUTER = (33, 263)
 
@@ -101,20 +103,21 @@ def export_segment(z, e: dict, a, seg_id: str) -> dict:
     meta = json.loads(str(z["meta"]))
     face_info = None
     if not a.no_face and "face_landmarks" in z.files:
-        lm = _pick(z["face_landmarks"][w], sel)
+        fsel = z["face_person"].astype(np.int64)[w] if "face_person" in z.files else sel   # face slot per frame
+        lm = _pick(z["face_landmarks"][w], fsel)
         coords = "image_px"
         if a.canonical_face or a.keep_transform:
             if "face_transform" not in z.files:
                 raise SystemExit("--canonical-face / --keep-transform need face_transform in the .npz "
                                  "(run batch_extract with --face --face-transform)")
-            tf = _pick(z["face_transform"][w], sel)
+            tf = _pick(z["face_transform"][w], fsel)
         if a.canonical_face:
             lm = np.stack([canonical_face(l, m) for l, m in zip(lm, tf)]) if len(lm) else lm
             coords = "canonical_iod"
         if a.drop_iris:
             lm = lm[:, :468]
-        arrs.update(face_landmarks=lm, face_blendshapes=_pick(z["face_blendshapes"][w], sel),
-                    face_scores=_pick(z["face_scores"][w], sel))
+        arrs.update(face_landmarks=lm, face_blendshapes=_pick(z["face_blendshapes"][w], fsel),
+                    face_scores=_pick(z["face_scores"][w], fsel))
         if a.keep_transform:
             arrs["face_transform"] = tf
         face_info = dict(coords=coords, iris_dropped=bool(a.drop_iris), n_landmarks=int(lm.shape[1]) if lm.ndim == 3 else 0,
@@ -153,7 +156,7 @@ def main(argv=None):
         if len(arrs["t"]) == 0:
             print(f"[points] event {k} ({e['mode']}, onset {e['clinical_onset_s']:.1f} s): no sampled frames, skipped")
             continue
-        np.savez_compressed(out / f"{seg}.npz", **arrs)
+        S.write_points(out / f"{seg}.npz", arrs)
         rows.append(dict(segment_id=seg, source_npz=str(Path(a.npz).resolve()), annotations=str(Path(a.annotations).resolve()),
                          event_mode=e["mode"], clinical_onset_s=e["clinical_onset_s"],
                          exported=_dt.datetime.now().astimezone().isoformat(timespec="seconds")))
