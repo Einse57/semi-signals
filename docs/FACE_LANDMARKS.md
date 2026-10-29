@@ -127,3 +127,57 @@ biometric identifiers under HIPAA, GDPR and state biometric laws, even without a
 `face_*` arrays like the video they came from. A points-only export (no frames, crops or thumbnails;
 optional canonical-pose normalisation and iris removal; random segment IDs) reduces re-identification
 risk; it does not guarantee de-identification.
+
+## Points-only segment export
+
+`src/points_export.py` (schema `semi-signals.points/1`) turns annotated events into segment files for a
+face/body annotation dataset without any image content.
+
+```
+python -m src.batch_extract --out data/extract --face --face-transform clip.mp4
+python -m src.points_export --npz data/extract/clip.npz --annotations clip.annotation.json \
+       --out export/points --mapping private/points_mapping.csv --mode both --drop-iris --canonical-face
+```
+
+| Option | Effect |
+|---|---|
+| `--mode body/face/both` | which annotated events to export (default both) |
+| `--pre-s`, `--post-s` | seconds before the clinical onset and after the clinical end (default 10, 10) |
+| `--default-len-s` | event length when no end was marked (default 30) |
+| `--drop-iris` | drop the 10 iris points (468-477) |
+| `--canonical-face` | remove head pose and position with MediaPipe's facial transformation matrix (needs `--face-transform` at extraction) |
+| `--keep-transform` | also store the 4x4 matrices (head pose and position) |
+| `--no-face` | body and hands only |
+| `--include-notes` | also export free-text notes (off by default: notes can contain names) |
+
+One `<segment_id>.npz` per event (`segment_id` = 16 random hex characters), selected person only:
+
+| Key | Shape | Content |
+|---|---|---|
+| `t` | (T,) | seconds relative to the marked clinical onset |
+| `body_kpts`, `body_scores` | (T, 17, 2), (T, 17) | COCO-17, frame pixels; NaN when no person was selected |
+| `hand_kpts`, `hand_scores` | (T, 2, 21, 2), (T, 2, 21) | left, right |
+| `face_landmarks` | (T, 478 or 468, 3) | image pixels (as in batch_extract) or, with `--canonical-face`, pose-free coordinates in units of the outer-eye-corner distance (landmarks 33 to 263) |
+| `face_blendshapes`, `face_scores` | (T, 52), (T,) | as in batch_extract |
+| `face_transform` | (T, 4, 4) | only with `--keep-transform` |
+| `meta` | JSON | schema, segment id, event (mode, relative clinical end and EEG onset, event class / seizure type / side / face term when set), sample rate, frame size, layouts, face options |
+
+Not exported: frames, crops, thumbnails, video names, paths, dates, annotator, patient id, and notes
+(unless `--include-notes`). The `.npz` zip entries carry the fixed 1980-01-01 time stamp; the file's own
+modification time on disk is set by the file system. The private mapping CSV (`segment_id`, source `.npz`,
+annotation file, event mode, onset in the source, export time) must be outside `--out`; keep it with the
+source videos.
+
+Canonical face: image coordinates (x right, y down, z away from the camera) are converted to MediaPipe's
+canonical-model axes (x, -y, -z), centred on the mean of the 468 mesh points, rotated by R^T (R = the
+rotation part of the facial transformation matrix) and divided by the outer-eye-corner distance. The axis
+convention was checked against the canonical face model in the model bundle
+(`geometry_pipeline_metadata_landmarks.binarypb`): on rolled (+-30 degrees) and perspective-warped copies of
+MediaPipe's test image, the remaining rotation to the canonical model was 3-10 degrees after
+normalisation and 30-54 degrees before.
+
+Limits: rigid normalisation removes head pose and position, not face shape. Dense landmarks and their
+motion can still be biometric identifiers, so a points-only export reduces re-identification risk and is
+not guaranteed de-identification. Handle the segments under the same agreements as the source videos.
+Not implemented: shape anonymisation (for example replacing per-subject shape with a mean face and keeping
+only motion), and a dataset-level manifest.

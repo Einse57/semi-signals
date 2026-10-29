@@ -101,12 +101,17 @@ Missing details are asked for in dialogs, not in the terminal.
      with child `ILAE2017_type`, `EEG_onset` (empty for now), `Notes`, `Exclude`, and the model tiers
      `Model_alarm` (value = peak probability) with child `Model_drivers`. Header properties: video sha256, fps,
      annotator, patient id/pseudonym, consent, model id, threshold, alarm rule, research-demo flag.
+     In Face or Both mode (`--mode`, launcher **Annotation mode**), face events go to a `Face_event` tier
+     (value = side L / R / both, or empty), their EEG onsets to `EEG_onset` as `fe01`, `fe02`, ... (body
+     events keep `sz01`, ... numbered over body events only), and terms, once `labels/face.json` has a list,
+     to a `Face_term` child tier. These tiers are written only when face events exist, so body-only files
+     are unchanged. See the README section "Annotation modes and label sets".
    - `<stem>_signals.csv` (per second: probability, smoothed probability, alarm state, driver speed, region
      speeds; the header line starts with `#`, missing values are `NaN`), `<stem>_tsconf.xml` (track setup)
      and `<stem>.pfsx` (ELAN viewer layout, written only if absent), so ELAN's Timeseries Viewer shows the
      lanes on open. Keep the files together; ELAN finds them again after the folder is moved or unzipped.
-   - `<stem>.annotation.json`: the same content plus a comparison of your marks with the model's alarms
-     (alarm start within 30 s before to 60 s after your marked onset).
+   - `<stem>.annotation.json`: the same content (each event has `mode`: `body` or `face`) plus a comparison
+     of your body marks with the model's alarms (alarm start within 30 s before to 60 s after your marked onset).
    Re-opening a video reloads its `.eaf`; a sha256 mismatch is refused, and `Model_*` tiers are regenerated,
    never read back as labels. ELAN (GPL-3.0) is not bundled; only its XML format is written.
 If the ELAN Timeseries Viewer shows no curves (checked on ELAN 7.0):
