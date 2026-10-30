@@ -32,8 +32,9 @@ python -m src.run_seizure_demo --input clip.mp4 --face --face-backend openvino
 ```
 
 `--face-device` takes `CPU` (default), `GPU`, `NPU` or `AUTO` and is passed to OpenVINO as the device
-name. On CPU the models run with f32 precision. Only CPU results are given below; other devices are
-selectable but no parity results are given for them here.
+name. On CPU the models run with f32 precision; GPU and NPU use their default (f16). The models are
+compiled with static input shapes, which the NPU needs; the NPU does not accept an f32 precision hint.
+`scripts/face_ov_devices.py` compiles and runs each model on each device and reports the result.
 
 In Python:
 
@@ -69,6 +70,26 @@ paired by landmark centre. `scripts/face_ov_parity.py` runs the single-face comp
 Per-frame time of the landmarker call on the same VM (median, VIDEO mode, `num_faces` 1, blendshapes and
 matrix on, clips with a face in every frame): MediaPipe 6.4-6.7 ms, OpenVINO CPU 2.9-4.0 ms. Shared VM;
 times vary between runs.
+
+## ARL: CPU, GPU and NPU
+
+Tested on: ARL Core Ultra 9 285H / Arc 140T / NPU (Windows 11, OpenVINO 2026.4.1, MediaPipe 1.2.0 on
+the same CPU as the reference). Same six clips, modes and measures as above.
+
+| Measure | CPU | GPU (Arc 140T) | NPU | Target |
+|---|---|---|---|---|
+| Frames with the same faces found | 100% | 99.67-100% | 100% | >= 99.5% |
+| Landmark error / inter-iris distance, mean | 0.0004-0.0011 | 0.0007-0.0020 | 0.0007-0.0020 | <= 0.005 |
+| Landmark error / inter-iris distance, p95 | 0.0008-0.0023 | 0.0014-0.0041 | 0.0014-0.0040 | <= 0.01 |
+| Blendshape Pearson r, mean (std > 0.02) | 0.9985-0.9997 | 0.992-0.998 | 0.989-0.998 | >= 0.98 |
+| Blendshape Pearson r, lowest coefficient | 0.995 | 0.975 | 0.952 | >= 0.9 |
+| Rotation difference, p95 (max) | 0.05-0.16 deg (0.36) | 0.05-0.28 deg (0.52) | 0.05-0.32 deg (0.59) | <= 1 deg |
+| Face fill: same faces filled, unmasked-face frames | every frame, none | every frame, none | every frame, none | |
+
+Median per-frame time of the landmarker call (VIDEO mode, `num_faces` 1, blendshapes and matrix on, the
+five clips with a face in every frame): MediaPipe 5.5-5.6 ms, OpenVINO CPU 2.6-3.1 ms, GPU 2.0-2.2 ms,
+NPU 3.7-4.1 ms. Whole fill step per frame (landmarks, other faces, fill and fill check), GRID clips:
+MediaPipe 44-46 ms, OpenVINO CPU 22-23 ms, GPU 22 ms, NPU 26 ms.
 
 ## Licences and model card
 
