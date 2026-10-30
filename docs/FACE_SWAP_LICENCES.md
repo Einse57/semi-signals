@@ -62,7 +62,7 @@ swap (rows 13-16) are not published. Stills of `fill`, `mosaic` and blur on GRID
 published with the row 18/19 attribution and a note that the frames were modified.
 
 Repository check (2026-10-29): no model weights, video, donor images or stills in any commit of this branch other
-than the row 18a GRID figure (one PNG, 361 KB)
+than the row 18a GRID figure (one PNG, 362 KB)
 (blobs over 1 MB or with weight, media or array extensions: only `third_party/vsvig/dy_point_order.pt`, 38 KB,
 VSViG point order, Apache-2.0, already on `main`, and the row 18a PNG); no Git LFS entries in `.gitattributes`; no access tokens or
 keys; every commit not yet on GitHub is authored and committed as the noreply address; `LICENSE` is MIT

@@ -76,9 +76,7 @@ W = the face box width (W = 108 px on frame 20).
 3. **mosaic, 8 blocks** (`mosaic8`): square blocks of round(W / 8) px, about 8 blocks across the face;
    **reduced risk, not de-identified**.
 4. **mosaic, 16 blocks** (`mosaic16`): square blocks of round(W / 16) px, about 16 blocks across the face;
-   **not de-identifying** (identity matched on 6 of 6 clips, see "Mosaic and blur per clip"). The caption
-   line inside the image reads "mosaic: reduced risk, not de-identified" for both mosaic panels; for
-   `mosaic16` the label in this legend applies.
+   **not de-identifying** (identity matched on 6 of 6 clips, see "Mosaic and blur per clip").
 5. **Gaussian blur** (`gauss`): sigma = W / 6 px; **local review only**.
 
 Credit: frames from the GRID audio-visual speech corpus, M. Cooke, J. Barker, S. Cunningham and X. Shao
