@@ -502,6 +502,8 @@ def main(argv=None):
                     ws["points"].write(points_frame(frame.shape, lm))
             for w_ in ws.values():
                 w_.release()
+            if guard is not None and guard.available:          # check the file as written (after MP4 encoding)
+                guard.check_encoded((R if "fill" in local_variants else P).video("fill"), len(T))
             found = int(np.isfinite(SC).sum())
             common = dict(Deidentified=True, AnnotationMode=",".join(sorted({e["mode"] for e in seg["events"]})) or "none",
                           FacePreprocess=a.face_preprocess, FaceLandmarker=lmk, PrivateMappingRef=mapping.name,
@@ -511,7 +513,7 @@ def main(argv=None):
             miss = ("; frames without the subject's face masked whole" if a.missing_face == "frame"
                     else "; frames without the subject's face NOT masked")
             fb = ("; faces YuNet found outside those areas filled as padded boxes; every output frame checked with "
-                  "YuNet (UnmaskedFaceCheck)" if guard is not None and guard.available else
+                  "YuNet, before and after encoding (UnmaskedFaceCheck)" if guard is not None and guard.available else
                   "; YuNet not available: no fallback boxes and no unmasked-face check")
             descs = dict(fill="subject face area (landmark hull grown 25%)" + bys + " painted with its mean colour" + miss
                          + (fb if guard is not None else ""),

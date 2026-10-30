@@ -9,6 +9,9 @@
 3. Second pass (check_fix): a flagged frame gets every flagged YuNet box filled as well (same padding,
    whether or not a landmark hull covers it) and is checked once more. Only frames still flagged after that
    count as unmasked.
+4. Encoded file (check_encoded): after the fill video is written, it is decoded again and every frame is
+   checked with the same detector and threshold, so MP4 compression cannot bring back a detectable face.
+   The export is shareable only when both checks pass (UnmaskedFaceCheck.EncodedOutputCheck).
 """
 from __future__ import annotations
 
@@ -72,6 +75,7 @@ class FillGuard:
     def reset(self):
         self.frames, self.unmasked, self.n_boxes, self.box_frames = 0, [], 0, 0
         self.first_pass, self.n_second, self.second_frames = [], 0, 0
+        self.encoded = None
 
     def _faces(self, frame):
         return [r for r in self.det.detect(frame) if float(r[-1]) >= self.score]
@@ -116,17 +120,57 @@ class FillGuard:
         self.unmasked.append(int(index))
         return out_frame, False
 
+    def check_encoded(self, path, expected=None) -> dict:
+        """Decode the written fill video at `path` and check every frame again (same detector and threshold).
+        `expected`: number of frames written; a shorter read-back fails the check."""
+        if not self.available:
+            self.encoded = dict(Ran=False, FramesChecked=0, ExpectedFrames=expected, UnmaskedFrames=[],
+                                UnmaskedFrameCount=0, Clean=False, Reason=self.problem)
+            return self.encoded
+        import cv2
+        cap, n, bad = cv2.VideoCapture(str(path)), 0, []
+        try:
+            while True:
+                ok, frame = cap.read()
+                if not ok:
+                    break
+                if self._faces(frame):
+                    bad.append(n)
+                n += 1
+        finally:
+            cap.release()
+        if n == 0:
+            reason = f"could not read the written fill video back ({Path(path).name})"
+        elif expected is not None and n != int(expected):
+            reason = f"read {n} of {int(expected)} frames back from the written fill video"
+        elif bad:
+            reason = f"YuNet found a face in {len(bad)} frame(s) of the encoded fill video"
+        else:
+            reason = None
+        self.encoded = dict(Ran=True, FramesChecked=n, ExpectedFrames=expected, UnmaskedFrames=bad,
+                            UnmaskedFrameCount=len(bad), Clean=reason is None, Reason=reason)
+        return self.encoded
+
     def result(self) -> dict:
         ran = self.available
-        clean = ran and not self.unmasked
+        enc = self.encoded
+        clean = ran and not self.unmasked and (enc is None or enc["Clean"])
+        reasons = []
+        if not ran:
+            reasons.append(self.problem)
+        else:
+            if self.unmasked:
+                reasons.append(f"YuNet found a face in {len(self.unmasked)} fill output frame(s)")
+            if enc is not None and not enc["Clean"]:
+                reasons.append(enc["Reason"])
         return dict(Ran=ran, Detector="YuNet (OpenCV Zoo face_detection_yunet_2023mar)", ScoreThreshold=self.score,
                     FramesChecked=self.frames, UnmaskedFrames=list(self.unmasked), UnmaskedFrameCount=len(self.unmasked),
                     FallbackBoxesFilled=self.n_boxes, FramesWithFallbackBoxes=self.box_frames, BoxPad=self.pad,
                     FirstPassUnmaskedFrames=list(self.first_pass), SecondPassBoxesFilled=self.n_second,
                     FramesWithSecondPassBoxes=self.second_frames,
+                    EncodedOutputCheck=None if enc is None else dict(enc),
                     Clean=clean,
-                    Reason=None if clean else (self.problem if not ran else
-                                               f"YuNet found a face in {len(self.unmasked)} fill output frame(s)"))
+                    Reason=None if clean else "; ".join(r for r in reasons if r))
 
     def summary(self, name="") -> str:
         r = self.result()
@@ -136,8 +180,17 @@ class FillGuard:
         s = (f"{r['FramesChecked']} frames checked, {r['FallbackBoxesFilled']} YuNet fallback box(es) filled in "
              f"{r['FramesWithFallbackBoxes']} frame(s); second pass on {r['FramesWithSecondPassBoxes']} frame(s) "
              f"({r['SecondPassBoxesFilled']} box(es)); ")
+        enc = r["EncodedOutputCheck"]
+        if enc is not None:
+            s += f"encoded file re-check: {enc['FramesChecked']} frames, {enc['UnmaskedFrameCount']} flagged; "
         if r["Clean"]:
             return head + s + "no unmasked face: shareable"
-        fr = r["UnmaskedFrames"]
-        show = ", ".join(map(str, fr[:50])) + (f", ... ({len(fr)} total)" if len(fr) > 50 else "")
-        return head + s + f"NOT SHAREABLE: YuNet found a face in {len(fr)} output frame(s): {show}"
+
+        def show(fr):
+            return ", ".join(map(str, fr[:50])) + (f", ... ({len(fr)} total)" if len(fr) > 50 else "")
+        bad = []
+        if r["UnmaskedFrames"]:
+            bad.append(f"YuNet found a face in {len(r['UnmaskedFrames'])} output frame(s): {show(r['UnmaskedFrames'])}")
+        if enc is not None and not enc["Clean"]:
+            bad.append(enc["Reason"] + (f": {show(enc['UnmaskedFrames'])}" if enc["UnmaskedFrames"] else ""))
+        return head + s + "NOT SHAREABLE: " + "; ".join(bad)

@@ -142,7 +142,9 @@ def test_export_clean_is_shareable(tmp_path, monkeypatch, capsys):
     c = j["UnmaskedFaceCheck"]
     assert rc == 0 and j["Shareable"] is True and j["Deidentified"] is True
     assert c["Clean"] and c["UnmaskedFrames"] == [] and c["FallbackBoxesFilled"] == 8 and c["FramesChecked"] == 8
-    assert "no unmasked face: shareable" in capsys.readouterr().out
+    assert c["EncodedOutputCheck"]["Clean"] and c["EncodedOutputCheck"]["FramesChecked"] == 8
+    out = capsys.readouterr().out
+    assert "no unmasked face: shareable" in out and "encoded file re-check: 8 frames, 0 flagged" in out
 
 
 def test_export_with_unmasked_frames_is_not_shareable(tmp_path, monkeypatch, capsys):
@@ -202,3 +204,55 @@ def test_second_pass_recheck_still_flagged_blocks(tmp_path, monkeypatch, capsys)
     assert c["FirstPassUnmaskedFrames"] == [3, 6] and c["SecondPassBoxesFilled"] == 2
     assert c["UnmaskedFrames"] == [3, 6] and j["Shareable"] is False and rc == 3
     assert "NOT SHAREABLE" in capsys.readouterr().out
+
+
+# ── check of the written (encoded) file ──────────────────────
+def test_encoded_check_reads_back_the_written_file(tmp_path):
+    v = tmp_path / "fill.mp4"
+    w = cv2.VideoWriter(str(v), cv2.VideoWriter_fourcc(*"mp4v"), 10, (32, 32))
+    for i in range(6):
+        w.write(np.full((32, 32, 3), 200 if i in (2, 5) else 50, np.uint8))
+    w.release()
+    g = G.FillGuard(detector=_Bright())
+    e = g.check_encoded(v, 6)
+    assert e["Ran"] and e["FramesChecked"] == 6 and e["UnmaskedFrames"] == [2, 5] and not e["Clean"]
+    r = g.result()
+    assert not r["Clean"] and r["UnmaskedFrames"] == [] and "encoded fill video" in r["Reason"]
+    assert r["EncodedOutputCheck"]["UnmaskedFrameCount"] == 2
+    assert "NOT SHAREABLE" in g.summary() and "encoded fill video: 2, 5" in g.summary()
+    assert not g.check_encoded(v, 8)["Clean"] and "6 of 8 frames" in g.result()["Reason"]   # short read-back
+    assert not g.check_encoded(tmp_path / "none.mp4")["Clean"]
+    g.reset()
+    assert g.result()["EncodedOutputCheck"] is None
+
+
+class _Late:
+    """Mock YuNet that only sees a face once switched on (stands in for a face that reappears after encoding)."""
+    def __init__(self):
+        self.on = False
+
+    def detect(self, frame):
+        return [_row(2, 2, 10, 10)] if self.on else []
+
+
+def test_export_blocked_when_encoded_file_shows_a_face(tmp_path, monkeypatch, capsys):
+    _clip(tmp_path)
+    det = _Late()
+    g = G.FillGuard(detector=det)
+    orig = g.check_encoded
+
+    def late(path, expected=None):
+        det.on = True
+        return orig(path, expected)
+    monkeypatch.setattr(g, "check_encoded", late)
+    monkeypatch.setattr(X, "make_preprocessor", lambda a: (_Est(), _Pre(_ring(40, 48)), None, None))
+    monkeypatch.setattr(X, "make_fill_guard", lambda a: g)
+    rc = X.main(["--input", str(tmp_path / "v.mp4"), "--whole", "--out", str(tmp_path / "o"), "--raw-root",
+                 str(tmp_path / "r"), "--deid", "fill", "--no-bystanders", "--shareable"])
+    j = S.read_json(next((tmp_path / "o").rglob("*desc-fill_video.json")))
+    c = j["UnmaskedFaceCheck"]
+    assert rc == 3 and j["Shareable"] is False and j["Deidentified"] is False
+    assert c["UnmaskedFrames"] == [] and c["EncodedOutputCheck"]["UnmaskedFrames"] == list(range(8))
+    assert c["EncodedOutputCheck"]["FramesChecked"] == 8 and "encoded fill video" in j["ShareableBlockedReason"]
+    out = capsys.readouterr().out
+    assert "encoded file re-check: 8 frames, 8 flagged" in out and "NOT SHAREABLE" in out
