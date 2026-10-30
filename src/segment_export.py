@@ -19,7 +19,9 @@ events last --default-len-s), or the whole clip with --whole / without --annotat
                                  the subject's face was not found); faces YuNet finds that the landmarker
                                  missed are filled as padded boxes, and YuNet checks every output frame
                                  (src/fill_guard.py): any face found there, or no YuNet model, means the
-                                 sidecar says Shareable false and lists the frames (UnmaskedFaceCheck)
+                                 sidecar says Shareable false and lists the frames (UnmaskedFaceCheck).
+                                 A flagged frame first gets its flagged YuNet boxes filled and is checked
+                                 once more; only frames still flagged block sharing
       ..._desc-points_video.mp4  (default) landmarks drawn on a blank canvas
       ..._desc-swap_video.mp4    face swap to a synthetic donor (--deid swap, src/deid_swap.py; the backend,
                                  ghost (default), warp or liveportrait, comes from --swap-config; "ghost" is also
@@ -463,7 +465,8 @@ def main(argv=None):
                         faces = [] if whole else ([lm] if lm is not None else []) + list(oth or [])
                         bx = [] if whole else guard.boxes(frame, landmark_mask(frame.shape, faces))
                         o = mask_faces(frame, lm, a.missing_face, others=oth or [], style=v, boxes=bx)
-                        guard.check(o, fi - f0)
+                        o, _ = guard.check_fix(o, fi - f0, lambda b2, bx=bx: mask_faces(
+                            frame, lm, a.missing_face, others=oth or [], style=v, boxes=bx + b2))
                         ws[v].write(o)
                     else:
                         ws[v].write(mask_faces(frame, lm, a.missing_face, others=oth or [], style=v))

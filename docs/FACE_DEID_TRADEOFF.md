@@ -18,7 +18,8 @@ How much face motion each method keeps (useful for semiology review) against how
 The Face Landmarker misses some faces (small, turned away). For each frame, `fill` also paints every YuNet
 detection that no landmark mask covers, as a box padded 20 % per side. After fill, YuNet runs on every output
 frame; if it finds a face (score >= 0.6), the export is marked not shareable and the frame indices are listed
-in the sidecar (`UnmaskedFaceCheck`) and printed. Without the YuNet model, fill runs on landmarks only and the
+in the sidecar (`UnmaskedFaceCheck`) and printed. A flagged frame first gets its flagged YuNet boxes filled
+(even inside a landmark hull) and is checked once more; only frames still flagged block sharing. Without the YuNet model, fill runs on landmarks only and the
 export can't be marked shareable (`python scripts/fetch_models.py --face-check`).
 
 ## Results
@@ -55,8 +56,8 @@ Intel sample videos (2 clips, 2810 frames).
 | LivePortrait | SFHQ | Intel 2/2 (2810) | 68 % / 72 % | 2.3 % (3800) | 0.4 % / 0.4 % (3800) | 0.32 / 0.20 | 1887 | reduced risk, not de-identified; research use only, local |
 
 The Intel `fill` row is before the fallback: YuNet found a face in 19 output frames (5 + 14). With the fallback
-(15 boxes filled) it finds one in 4 frames (0 + 4), all on head-pose-face-detection-female-and-male, so the
-unmasked-face check marks that clip not shareable. Fill plus fallback and check: 13-15 ms/frame on the box CPU.
+(15 boxes) it finds 4 (0 + 4); the second pass fills those 4 and the recheck finds none, so both Intel clips and
+all 4 GRID clips pass. Fill with fallback and check: 13-15 ms/frame (Intel), 6 ms/frame (GRID), box CPU.
 
 ### Mosaic and blur per clip
 

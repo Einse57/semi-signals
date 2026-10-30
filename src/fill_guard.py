@@ -6,6 +6,9 @@
 2. Check: YuNet runs again on every fill output frame. A frame with a detection at or above the score
    threshold is "unmasked". Any unmasked frame, or no YuNet model at all, means the fill export is not
    marked shareable; the sidecar lists the frame indices (UnmaskedFaceCheck).
+3. Second pass (check_fix): a flagged frame gets every flagged YuNet box filled as well (same padding,
+   whether or not a landmark hull covers it) and is checked once more. Only frames still flagged after that
+   count as unmasked.
 """
 from __future__ import annotations
 
@@ -68,6 +71,7 @@ class FillGuard:
 
     def reset(self):
         self.frames, self.unmasked, self.n_boxes, self.box_frames = 0, [], 0, 0
+        self.first_pass, self.n_second, self.second_frames = [], 0, 0
 
     def _faces(self, frame):
         return [r for r in self.det.detect(frame) if float(r[-1]) >= self.score]
@@ -92,12 +96,34 @@ class FillGuard:
             return False
         return True
 
+    def check_fix(self, out_frame, index, refill):
+        """Check with one second pass. `refill(boxes)` re-renders the fill frame with these extra boxes.
+        Returns (frame to write, clean)."""
+        if not self.available:
+            return out_frame, False
+        self.frames += 1
+        rows = self._faces(out_frame)
+        if not rows:
+            return out_frame, True
+        self.first_pass.append(int(index))
+        bx = [b for b in (pad_box(r, out_frame.shape, self.pad) for r in rows) if b is not None]
+        if bx:
+            self.n_second += len(bx)
+            self.second_frames += 1
+            out_frame = refill(bx)
+            if not self._faces(out_frame):
+                return out_frame, True
+        self.unmasked.append(int(index))
+        return out_frame, False
+
     def result(self) -> dict:
         ran = self.available
         clean = ran and not self.unmasked
         return dict(Ran=ran, Detector="YuNet (OpenCV Zoo face_detection_yunet_2023mar)", ScoreThreshold=self.score,
                     FramesChecked=self.frames, UnmaskedFrames=list(self.unmasked), UnmaskedFrameCount=len(self.unmasked),
                     FallbackBoxesFilled=self.n_boxes, FramesWithFallbackBoxes=self.box_frames, BoxPad=self.pad,
+                    FirstPassUnmaskedFrames=list(self.first_pass), SecondPassBoxesFilled=self.n_second,
+                    FramesWithSecondPassBoxes=self.second_frames,
                     Clean=clean,
                     Reason=None if clean else (self.problem if not ran else
                                                f"YuNet found a face in {len(self.unmasked)} fill output frame(s)"))
@@ -108,7 +134,8 @@ class FillGuard:
         if not r["Ran"]:
             return head + "NOT SHAREABLE: unmasked-face check not run. " + (self.problem or "")
         s = (f"{r['FramesChecked']} frames checked, {r['FallbackBoxesFilled']} YuNet fallback box(es) filled in "
-             f"{r['FramesWithFallbackBoxes']} frame(s); ")
+             f"{r['FramesWithFallbackBoxes']} frame(s); second pass on {r['FramesWithSecondPassBoxes']} frame(s) "
+             f"({r['SecondPassBoxesFilled']} box(es)); ")
         if r["Clean"]:
             return head + s + "no unmasked face: shareable"
         fr = r["UnmaskedFrames"]

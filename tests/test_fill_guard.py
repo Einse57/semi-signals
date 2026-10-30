@@ -110,13 +110,14 @@ class _Est:
         pass
 
 
-def _clip(tmp_path, bright=()):
+def _clip(tmp_path, bright=(), face=(100, 30, 40, 40)):
+    x, y, fw, fh = face
     v = tmp_path / "v.mp4"
     w = cv2.VideoWriter(str(v), cv2.VideoWriter_fourcc(*"mp4v"), 10, (160, 96))
     rng = np.random.default_rng(0)
     for i in range(8):
         f = np.full((96, 160, 3), 210 if i in bright else 60, np.uint8)
-        f[30:70, 100:140] = rng.integers(0, 255, (40, 40, 3), np.uint8)   # a "face" the landmarker misses
+        f[y:y + fh, x:x + fw] = rng.integers(0, 255, (fh, fw, 3), np.uint8)   # a "face" for the mock YuNet
         w.write(f)
     w.release()
     return v
@@ -168,3 +169,36 @@ def test_ui_flags_missing_yunet(tmp_path):
     (tmp_path / G.MODEL_NAME).write_bytes(b"x")
     assert O.fill_check_problems(tmp_path) == []
     assert "checked with YuNet" in O.label_text("fill")
+
+
+def test_second_pass_unit():
+    g = G.FillGuard(detector=_Textured([(4, 4, 10, 10)]))
+    rng = np.random.default_rng(2)
+    f = rng.integers(0, 255, (30, 30, 3), np.uint8)
+    flat = lambda bx: X.mask_faces(f, None, missing="none", boxes=bx)
+    o, ok = g.check_fix(f, 7, flat)                                   # second pass clears it
+    assert ok and np.ptp(o[4:14, 4:14].reshape(-1, 3), 0).max() == 0
+    o, ok = g.check_fix(f, 9, lambda bx: f)                           # refill that leaves the face: blocked
+    r = g.result()
+    assert not ok and r["FirstPassUnmaskedFrames"] == [7, 9] and r["UnmaskedFrames"] == [9]
+    assert r["SecondPassBoxesFilled"] == 2 and r["FramesWithSecondPassBoxes"] == 2 and not r["Clean"]
+
+
+def test_second_pass_clears_face_centred_inside_hull(tmp_path, monkeypatch, capsys):
+    # face box centred on the landmark hull (so the fallback skips it) but larger than the hull
+    _clip(tmp_path, face=(20, 28, 40, 40))
+    rc, j = _run(tmp_path, monkeypatch, _Textured([(20, 28, 40, 40)]), ["--shareable"])
+    c = j["UnmaskedFaceCheck"]
+    assert c["FallbackBoxesFilled"] == 0
+    assert c["FirstPassUnmaskedFrames"] == list(range(8)) and c["FramesWithSecondPassBoxes"] == 8
+    assert c["UnmaskedFrames"] == [] and c["Clean"] and j["Shareable"] is True and rc == 0
+    assert "second pass on 8 frame(s)" in capsys.readouterr().out
+
+
+def test_second_pass_recheck_still_flagged_blocks(tmp_path, monkeypatch, capsys):
+    _clip(tmp_path, bright=(3, 6))
+    rc, j = _run(tmp_path, monkeypatch, _Bright(), ["--shareable"])
+    c = j["UnmaskedFaceCheck"]
+    assert c["FirstPassUnmaskedFrames"] == [3, 6] and c["SecondPassBoxesFilled"] == 2
+    assert c["UnmaskedFrames"] == [3, 6] and j["Shareable"] is False and rc == 3
+    assert "NOT SHAREABLE" in capsys.readouterr().out
