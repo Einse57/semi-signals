@@ -175,7 +175,9 @@ class FaceEstimator:
             expect = FACE_TASK_SHA256 if model_path is None else None
             self._ov = FaceLandmarkerOV(path, device=self.device, video=False,
                                         min_detection_confidence=min_det_conf,
-                                        min_presence_confidence=min_presence, expected_sha256=expect)
+                                        min_presence_confidence=min_presence, expected_sha256=expect,
+                                        num_faces=self.num_faces, blendshapes=self.blendshapes,
+                                        transform=bool(transform))
             return
         import mediapipe as mp
         from mediapipe.tasks.python import BaseOptions, vision
@@ -213,11 +215,13 @@ class FaceEstimator:
         off = np.array([offset[0], offset[1], 0.0], np.float32)
         out = []
         if self._ov is not None:
-            r = self._ov.process(rgb)
-            for f in ([] if r is None else [r]):
-                bs = f.blendshapes.astype(np.float32) if self.blendshapes else np.full(N_BLEND, np.nan, np.float32)
-                out.append(dict(landmarks=(f.landmarks * scale + off).astype(np.float32), blendshapes=bs,
-                                score=np.float32(1.0), transform=np.full((4, 4), np.nan, np.float32)))
+            # Same score rule as the MediaPipe path (it reports no per-face confidence): 1.0 for a found face.
+            for f in self._ov.detect(rgb):
+                tf = (np.asarray(f.transform, np.float32) if self._transform and f.transform is not None
+                      else np.full((4, 4), np.nan, np.float32))
+                out.append(dict(landmarks=(f.landmarks * scale + off).astype(np.float32),
+                                blendshapes=f.blendshapes.astype(np.float32), score=np.float32(1.0),
+                                transform=tf))
             return out
         res = self._lm.detect(self._mp.Image(image_format=self._mp.ImageFormat.SRGB, data=rgb))
         for i, f in enumerate(res.face_landmarks):

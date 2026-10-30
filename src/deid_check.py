@@ -52,9 +52,10 @@ class EmbedderNotConfigured(RuntimeError):
 class MediaPipeDetector:
     """Face count with the MediaPipe Face Landmarker (BlazeFace detector inside), whole frame + 4 tiles."""
 
-    def __init__(self, model_path=None, num_faces=8):
+    def __init__(self, model_path=None, num_faces=8, backend="mediapipe", device="CPU"):
         from src.face_estimator import FaceEstimator
-        self.est = FaceEstimator(model_path=model_path, num_faces=num_faces, blendshapes=False)
+        self.est = FaceEstimator(model_path=model_path, num_faces=num_faces, blendshapes=False,
+                                 backend=backend, device=device)
 
     def count(self, frame):
         from src.segment_export import other_faces
@@ -308,16 +309,19 @@ def main(argv=None):
     p.add_argument("--donor", default=None, help="donor face image (face swap only)")
     p.add_argument("--embedder-config", default=None)
     p.add_argument("--face-model", default=None)
+    from src.face_estimator import add_face_backend_args
+    add_face_backend_args(p)
     p.add_argument("--yunet", default=None, help="also count faces with YuNet (face_detection_yunet_2023mar.onnx)")
     p.add_argument("--json", default=None, help="write the results here (keep it with the raw files)")
     a = p.parse_args(argv)
     from src.face_estimator import FaceEstimator
     from src.face_preprocess import FacePreprocessor
     res = {}
-    det = MediaPipeDetector(a.face_model)
+    det = MediaPipeDetector(a.face_model, backend=a.face_backend, device=a.face_device)
     try:
         res["detector"] = dict(original=hit_rate(a.original, det), deid=hit_rate(a.deid, det),
-                               detector="MediaPipe Face Landmarker (whole frame + 4 tiles)")
+                               detector="MediaPipe Face Landmarker (whole frame + 4 tiles)"
+                               + (f", OpenVINO {a.face_device}" if a.face_backend == "openvino" else ""))
     finally:
         det.close()
     if a.yunet:
@@ -326,7 +330,7 @@ def main(argv=None):
     ests = []
 
     def lmk():                                   # fresh estimator + tracker: no state shared between clips
-        e = FaceEstimator(model_path=a.face_model)
+        e = FaceEstimator(model_path=a.face_model, backend=a.face_backend, device=a.face_device)
         ests.append(e)
         return FacePreprocessor(e, "detect")
     try:

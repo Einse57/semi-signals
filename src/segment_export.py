@@ -69,6 +69,8 @@ def parse_args(argv=None):
     p.add_argument("--mapping", default=None, help="private mapping CSV (default <raw-root>/private_mapping.csv)")
     p.add_argument("--face-preprocess", default="none", choices=["none", "detect", "coco-head"])
     p.add_argument("--face-model", default=None)
+    from src.face_estimator import add_face_backend_args
+    add_face_backend_args(p)
     p.add_argument("--deid", default="fill,points",
                    help="comma list of video variants: fill (default; faces painted solid), points (default; "
                         "landmarks only), swap (face swap to a donor; needs --swap-config; backend ghost unless the config names another; alias ghost), blur (LOCAL REVIEW ONLY, NOT FOR "
@@ -307,10 +309,15 @@ def append_mapping(path: Path, rows):
         w.writerows(rows)
 
 
+def face_backend_kwargs(a) -> dict:
+    """--face-backend / --face-device as FaceEstimator keyword arguments (defaults when absent)."""
+    return dict(backend=getattr(a, "face_backend", "mediapipe"), device=getattr(a, "face_device", "CPU"))
+
+
 def make_preprocessor(a):
     from src.face_estimator import FaceEstimator
     from src.face_preprocess import FacePreprocessor
-    est = FaceEstimator(model_path=a.face_model, transform=True)
+    est = FaceEstimator(model_path=a.face_model, transform=True, **face_backend_kwargs(a))
     pose = det = None
     if a.face_preprocess == "coco-head":
         from src.detector import PersonDetector
@@ -415,7 +422,7 @@ def main(argv=None):
     multi = None
     if any(v in variants for v in MASK_STYLES + ("swap",)) and not a.no_bystanders:
         from src.face_estimator import FaceEstimator
-        multi = FaceEstimator(model_path=a.face_model, num_faces=8, blendshapes=False)
+        multi = FaceEstimator(model_path=a.face_model, num_faces=8, blendshapes=False, **face_backend_kwargs(a))
     guard = make_fill_guard(a) if "fill" in variants else None
     if guard is not None and not guard.available:
         print("[fill check] " + guard.problem, flush=True)
