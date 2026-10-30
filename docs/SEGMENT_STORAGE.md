@@ -111,42 +111,41 @@ in the private mapping.
 | `swap` | export (opt-in) | REDUCED RISK, NOT DE-IDENTIFIED: face swap to a donor face (`--deid swap`; `ghost` is accepted as an alias). Needs `--swap-config` with a licence-reviewed backend and a licensed donor, and exits with an error otherwise. Backends: `ghost` (the default swap backend, used when the configuration names none) and `liveportrait` (research use only; need `research_use_acknowledged`; code and weights outside the repository). `warp`: landmark-driven warp of a synthetic donor. The subject's face outline, hair, skin colour, head pose and expression remain, and an identity check still finds partial similarity (see [FACE_SWAP_LICENCES.md](FACE_SWAP_LICENCES.md)). Sidecar: `Deidentified: false`, `DeidentificationStatus: "reduced risk, not de-identified"`, `SwapBackend`, `SwapDonorLicence`, and `ResearchUseOnly: true` for ghost and liveportrait. Not a shareable default |
 | `blur` | raw only (opt-in) | **local review only, not for sharing.** Face areas pixelated and blurred. Written under `--raw-root`; `--blur-in-export` puts it in the export, with `NotForSharing: true` and `Deidentified: false` in its sidecar |
 | `points` | export | the subject's landmarks drawn on a black canvas, no image content |
-| `mosaic8` | export (opt-in, `--deid-method mosaic8`) | REDUCED RISK, NOT DE-IDENTIFIED: face areas pixelated, square blocks of face width / 8 px. Sidecar `Deidentified: false`, `Shareable: false` |
-| `mosaic16` | raw only (`--deid-method mosaic16`) | **not de-identifying** (provisional: identity still matched on 5 of 6 clips scored; the final check is in [FACE_DEID_TRADEOFF.md](FACE_DEID_TRADEOFF.md)). Blocks of face width / 16 px. Always under `--raw-root`, `NotForSharing: true` |
-| `gauss` | raw only (`--deid-method gauss`) | **local review only.** Gaussian blur, sigma = face width / 6 px. Always under `--raw-root`, `NotForSharing: true`; never exported or shareable |
 
 Each video sidecar records the variant, the number of frames with a face, the number of bystander faces
 masked (`BystanderFacesMasked`), the preprocessing mode and `Deidentified`; the blur variant also has
 `NotForSharing`.
 
-Variants chosen with `--deid-method` (the face de-identification selector in the UI, below) also carry
-`DeidentificationStatus` (the UI label) and `Shareable` (true only for `fill`).
+Variants chosen with `--deid-method fill` or `--deid-method ghost` (the face selector in the UI, below) also
+carry `DeidentificationStatus` (the UI label) and `Shareable` (true only for `fill`).
 
 ## Face de-identification in the UI (face mode)
 
 The launcher (Annotation mode Face or Both) and the annotation panel ("De-ID export...", face and both
-modes) have the same selector (`src/deid_ui.py`; names, labels and rules in `src/deid_options.py`):
+modes) have the same selector (`src/deid_ui.py`; names, labels and rules in `src/deid_options.py`). It
+offers only:
 
-- **Method**: Fill (default), Mosaic 8, Mosaic 16, Gaussian blur, or Face swap. Fill is the default
-  overall because it is the shareable fallback.
-- **Swap backend** (only with Face swap): GHOST (the default swap), warp, LivePortrait.
-- **Label** next to the choice: fill "shareable fallback (default)"; mosaic8, warp, GHOST, LivePortrait
-  "reduced risk, not de-identified"; mosaic16 "not de-identifying" (provisional); Gaussian blur "local
-  review only".
-- **Export for sharing** can only be ticked with fill.
-- **Research-use acknowledgement** for GHOST and LivePortrait: without it the export and preview buttons
-  refuse; it is passed to the backend as `research_use_acknowledged` (`--research-use-acknowledged`), and
-  the UI choice replaces the configuration file's value. It is not saved between sessions.
-- **Missing models**: the selector lists what is missing and where to fetch it from the official sources
-  (GHOST `download_models.sh`, Hugging Face KlingTeam/LivePortrait, `scripts/fetch_models.py --face` /
-  `--face-check`); nothing is redistributed or downloaded automatically ([FACE_SWAP_LICENCES.md](FACE_SWAP_LICENCES.md)).
-- **Preview (before/after)**: one frame of the video (middle frame) before and after the chosen method,
-  nothing saved.
+- **View: Original**: the video as recorded, "not de-identified"; for viewing and the preview only, never
+  exported from the selector.
+- **De-identify: Fill** (default): label "shareable fallback (default)"; the only choice that can be
+  exported for sharing ("Export for sharing" can only be ticked with Fill).
+- **De-identify: GHOST** (face swap): label "reduced risk, not de-identified"; research use only.
+  - **Research-use acknowledgement**: without it the export and preview refuse; it is passed to the backend
+    as `research_use_acknowledged` (`--research-use-acknowledged`) and replaces the configuration file's
+    value. It is not saved between sessions.
+  - **Missing weights**: the selector says what is missing and where to fetch it: GHOST's own
+    `download_models.sh` (https://github.com/ai-forever/ghost/blob/main/download_models.sh) and
+    [FACE_SWAP_LICENCES.md](FACE_SWAP_LICENCES.md). Nothing is redistributed or downloaded automatically.
+- **Preview (before/after)**: one frame of the video (middle frame) before and after the choice, nothing
+  saved.
 
-Export runs `python -m src.segment_export ... --deid-method <method>` into `~/semi-signals-local/export`
-(raw and local-only variants into `~/semi-signals-local/raw`). segment_export checks the method, the
-shareable rule, the acknowledgement and the configuration's backend again and exits with the reason before
-writing anything.
+The other methods measured in phase 4 (mosaic 8 / 16, Gaussian blur, warp, LivePortrait; see
+[FACE_DEID_TRADEOFF.md](FACE_DEID_TRADEOFF.md)) stay in the measurement code and are not offered in the UI.
+
+Export runs `python -m src.segment_export ... --deid-method fill|ghost` into `~/semi-signals-local/export`
+(raw into `~/semi-signals-local/raw`). segment_export accepts only `fill` or `ghost` on this path and checks
+the shareable rule (fill only), the acknowledgement (ghost) and the configuration's backend again, and exits
+with the reason before writing anything.
 
 ## Sidecar fields (custom)
 

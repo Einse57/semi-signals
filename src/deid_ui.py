@@ -1,5 +1,6 @@
-"""Face de-identification selector (tkinter) for the launcher (face mode) and the annotation panel.
+"""Face view / de-identification selector (tkinter) for the launcher (face mode) and the annotation panel.
 
+Offers only View: Original, and De-identify: Fill (default, the only shareable export) or GHOST.
 Rules, names and labels come from src/deid_options.py; src/segment_export.py checks them again.
 """
 from __future__ import annotations
@@ -9,9 +10,9 @@ from pathlib import Path
 
 from src import deid_options as O
 
-ACK_TEXT = ("I acknowledge that GHOST / LivePortrait are research use only: I fetched the third-party code and "
-            "weights myself from the official sources under their terms, and the output stays on this computer.")
-COLOURS = {O.SHAREABLE: "#060", O.LOCAL_ONLY: "#a33", O.NOT_DEID: "#a33"}
+ACK_TEXT = ("I acknowledge that GHOST is research use only: I fetched its code and weights myself from the "
+            "official sources under their terms, and the output stays on this computer.")
+COLOURS = {O.SHAREABLE: "#060", O.ORIGINAL_LABEL: "#555"}
 
 
 def label_colour(method: str) -> str:
@@ -19,34 +20,29 @@ def label_colour(method: str) -> str:
 
 
 class DeidSelector:
-    """Two-level selector: method (fill default) and, for "swap", the backend (ghost default)."""
+    """One choice: Original (view only), Fill (default) or GHOST."""
 
     def __init__(self, parent, settings: dict | None = None, models_dir: Path | None = None, on_change=None):
         import tkinter as tk
         from tkinter import ttk
         st = settings or {}
         self.models_dir, self.on_change, self.tk = models_dir, on_change, tk
-        self.frame = f = ttk.LabelFrame(parent, text="Face de-identification (face mode)", padding=8)
+        self.frame = f = ttk.LabelFrame(parent, text="Face view / de-identification (face mode)", padding=8)
         m0 = st.get("deid_method", O.DEFAULT_METHOD)
-        m0 = m0 if m0 in O.METHODS else O.DEFAULT_METHOD
-        self.family = tk.StringVar(value=O.family_of(m0))
-        self.swap = tk.StringVar(value=m0 if m0 in O.SWAP_METHODS else O.DEFAULT_SWAP)
+        m0 = m0 if m0 in O.METHODS else O.DEFAULT_METHOD        # older settings (mosaic, warp, ...) -> fill
+        self.choice = tk.StringVar(value=m0)
         self.ack = tk.BooleanVar(value=False)              # never restored from settings: ticked per session
         self.share = tk.BooleanVar(value=False)
         self.swap_config = tk.StringVar(value=st.get("swap_config", ""))
-        ttk.Label(f, text="Method").grid(row=0, column=0, sticky="nw")
-        fam = ttk.Frame(f); fam.grid(row=0, column=1, columnspan=3, sticky="w")
-        self.widgets = []
-        for i, k in enumerate(O.FAMILIES):
-            txt = "Face swap..." if k == "swap" else O.title(k) + (" (default)" if k == O.DEFAULT_METHOD else "")
-            b = ttk.Radiobutton(fam, text=txt, value=k, variable=self.family, command=self.changed)
-            b.grid(row=i // 3, column=i % 3, sticky="w", padx=(0, 10)); self.widgets.append(b)
-        ttk.Label(f, text="Swap backend").grid(row=1, column=0, sticky="nw", pady=(4, 0))
-        sw = ttk.Frame(f); sw.grid(row=1, column=1, columnspan=3, sticky="w", pady=(4, 0))
-        self.swap_btns = []
-        for i, k in enumerate(O.SWAP_METHODS):
-            b = ttk.Radiobutton(sw, text=O.title(k), value=k, variable=self.swap, command=self.changed)
-            b.grid(row=0, column=i, sticky="w", padx=(0, 10)); self.swap_btns.append(b)
+        ttk.Label(f, text="View").grid(row=0, column=0, sticky="w")
+        self.buttons = {}
+        b = ttk.Radiobutton(f, text="Original", value=O.ORIGINAL, variable=self.choice, command=self.changed)
+        b.grid(row=0, column=1, sticky="w", padx=(0, 10)); self.buttons[O.ORIGINAL] = b
+        ttk.Label(f, text="De-identify").grid(row=1, column=0, sticky="w", pady=(4, 0))
+        for i, k in enumerate(O.METHODS):
+            txt = O.title(k) + (" (default)" if k == O.DEFAULT_METHOD else "")
+            b = ttk.Radiobutton(f, text=txt, value=k, variable=self.choice, command=self.changed)
+            b.grid(row=1, column=1 + i, sticky="w", padx=(0, 10), pady=(4, 0)); self.buttons[k] = b
         self.status = ttk.Label(f, text="", wraplength=720, justify="left")
         self.status.grid(row=2, column=0, columnspan=4, sticky="w", pady=(6, 0))
         ttk.Label(f, text="Swap config").grid(row=3, column=0, sticky="w", pady=(4, 0))
@@ -55,7 +51,7 @@ class DeidSelector:
         self.cfg_btn = ttk.Button(f, text="Browse...", command=self.browse_config)
         self.cfg_btn.grid(row=3, column=3, sticky="w", padx=6, pady=(4, 0))
         ack = ttk.Frame(f); ack.grid(row=4, column=0, columnspan=4, sticky="w", pady=(4, 0))
-        self.ack_cb = ttk.Checkbutton(ack, text="Research use acknowledged (GHOST / LivePortrait)", variable=self.ack,
+        self.ack_cb = ttk.Checkbutton(ack, text="Research use acknowledged (GHOST)", variable=self.ack,
                                       command=self.changed)
         self.ack_cb.grid(row=0, column=0, sticky="nw")
         ttk.Label(ack, text=ACK_TEXT, foreground="#666", wraplength=520, justify="left").grid(
@@ -64,13 +60,13 @@ class DeidSelector:
         self.share_cb.grid(row=5, column=0, columnspan=2, sticky="w", pady=(4, 0))
         self.weights = ttk.Label(f, text="", foreground="#a33", wraplength=720, justify="left")
         self.weights.grid(row=6, column=0, columnspan=4, sticky="w", pady=(4, 0))
-        self.widgets += self.swap_btns + [self.cfg_entry, self.cfg_btn, self.ack_cb, self.share_cb]
+        self.widgets = list(self.buttons.values()) + [self.cfg_entry, self.cfg_btn, self.ack_cb, self.share_cb]
         self.swap_config.trace_add("write", lambda *_: self.changed())
         self.changed()
 
     # state
     def method(self) -> str:
-        return O.resolve(self.family.get(), self.swap.get())
+        return O.check_choice(self.choice.get())
 
     def state(self) -> dict:
         m = self.method()
@@ -79,10 +75,12 @@ class DeidSelector:
                     shareable=bool(self.share.get()) and O.is_shareable(m))
 
     def problems(self) -> list[str]:
-        """Why an export or preview cannot start now ([] = ready)."""
+        """Why an export cannot start now ([] = ready)."""
         s = self.state()
         m = s["deid_method"]
         err = O.validate_request(m, research_ack=s["research_ack"], shareable=s["shareable"])
+        if m == O.ORIGINAL:
+            return err
         missing = O.weights_problems(m, s["swap_config"] or None, self.models_dir)
         if missing:
             err.append(O.missing_weights_message(m, missing))
@@ -91,8 +89,6 @@ class DeidSelector:
     def changed(self):
         m = self.method()
         swap = m in O.SWAP_METHODS
-        for b in self.swap_btns:
-            b.configure(state="normal" if swap else "disabled")
         for w in (self.cfg_entry, self.cfg_btn):
             w.configure(state="normal" if swap else "disabled")
         self.ack_cb.configure(state="normal" if O.needs_ack(m) else "disabled")
@@ -100,7 +96,7 @@ class DeidSelector:
             self.share.set(False)
         self.share_cb.configure(state="normal" if O.is_shareable(m) else "disabled")
         self.status.configure(text=f"{O.title(m)}: {O.label_text(m)}", foreground=label_colour(m))
-        self.weights.configure(text="\n".join(self.problems()))
+        self.weights.configure(text="\n".join(p for p in self.problems() if m != O.ORIGINAL))
         if self.on_change:
             self.on_change()
 

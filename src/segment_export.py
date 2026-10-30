@@ -47,11 +47,10 @@ from src.deid_swap import DEID_STATUS, RESEARCH_ONLY
 
 REPO = Path(__file__).resolve().parent.parent
 VARIANTS = ("fill", "points", "swap", "blur")       # --deid (CLI)
-METHOD_VARIANTS = VARIANTS + ("mosaic8", "mosaic16", "gauss")   # also reachable with --deid-method (UI)
 ALIASES = {"ghost": "swap"}
 NOT_FOR_SHARING = ("blur",)
-LOCAL_ONLY = ("mosaic16", "gauss")        # always under --raw-root, never in the export (src/deid_options.py)
-MASK_STYLES = ("fill", "blur", "mosaic8", "mosaic16", "gauss")
+MASK_STYLES = ("fill", "blur")           # variants written with mask_faces (the mosaic / gauss styles are for
+                                         # the phase 4 measurements only, not export variants)
 
 
 def parse_args(argv=None):
@@ -72,11 +71,12 @@ def parse_args(argv=None):
                    help="put the blur variant in the export too (marked NotForSharing in its sidecar)")
     p.add_argument("--swap-config", default=None, help="face-swap configuration JSON for --deid swap (src/deid_swap.py)")
     p.add_argument("--deid-method", default=None, choices=list(O.METHODS),
-                   help="one method as chosen in the UI (src/deid_options.py): fill (shareable fallback), mosaic8, "
-                        "mosaic16 (local only), gauss (local review only), or a swap backend ghost / warp / "
-                        "liveportrait; replaces --deid with <method>,points and is validated here")
+                   help="the de-identification chosen in the UI (src/deid_options.py): fill (default, the only "
+                        "shareable export) or ghost (face swap, reduced risk, not de-identified, research use "
+                        "only); replaces --deid with <method>,points and is validated here; nothing else is "
+                        "accepted on this path")
     p.add_argument("--research-use-acknowledged", action="store_true",
-                   help="with --deid-method ghost or liveportrait: the research-use acknowledgement from the UI; "
+                   help="with --deid-method ghost: the research-use acknowledgement from the UI; "
                         "passed on as research_use_acknowledged (required, overrides the configuration's value)")
     p.add_argument("--shareable", action="store_true",
                    help="export for sharing: refused unless the method is shareable (only fill)")
@@ -324,7 +324,7 @@ def resolve_variants(a):
         err = O.validate_request(m, research_ack=a.research_use_acknowledged, shareable=a.shareable,
                                  swap_config_backend=backend)
         if a.blur_in_export:
-            err.append("--blur-in-export does not apply to --deid-method (local-only methods stay local)")
+            err.append("--blur-in-export does not apply to --deid-method (only fill or ghost)")
         if err:
             raise SystemExit("--deid-method " + m + ": " + "; ".join(err))
         return O.export_variants(m), (O.swap_overrides(m, a.research_use_acknowledged) if m in O.SWAP_METHODS else None)
@@ -337,7 +337,7 @@ def resolve_variants(a):
         if bad:
             raise SystemExit(f"--shareable: {', '.join(bad)} cannot be exported for sharing; only fill is shareable")
     if a.research_use_acknowledged:
-        raise SystemExit("--research-use-acknowledged goes with --deid-method ghost or liveportrait")
+        raise SystemExit("--research-use-acknowledged goes with --deid-method ghost")
     return variants, None
 
 
@@ -365,7 +365,7 @@ def main(argv=None):
         probs = O.face_model_problems(REPO / "models")
         if probs:
             raise SystemExit(O.missing_weights_message(a.deid_method, probs))
-    export_variants = [v for v in variants if not (v in LOCAL_ONLY or (v == "blur" and not a.blur_in_export))]
+    export_variants = [v for v in variants if not (v == "blur" and not a.blur_in_export)]
     local_variants = [v for v in variants if v not in export_variants]
     cap = cv2.VideoCapture(str(video))
     if not cap.isOpened():
@@ -449,15 +449,11 @@ def main(argv=None):
                          swap="REDUCED RISK, NOT DE-IDENTIFIED: faces replaced by a donor face (face swap, "
                               + (swapper.name if swapper else "-") + "); outline, hair, skin colour, pose and "
                               "expression remain" + miss,
-                         points="face landmarks drawn on a blank canvas; no image content",
-                         mosaic8="REDUCED RISK, NOT DE-IDENTIFIED: face areas pixelated, blocks of face width / 8" + miss,
-                         mosaic16="NOT DE-IDENTIFYING (provisional), LOCAL ONLY: face areas pixelated, blocks of face "
-                                  "width / 16; identity still matched on 5 of 6 clips scored" + miss,
-                         gauss="LOCAL REVIEW ONLY, NOT FOR SHARING: Gaussian blur, sigma = face width / 6" + miss)
+                         points="face landmarks drawn on a blank canvas; no image content")
             for v in variants:
                 local = v in local_variants
                 extra = dict(common, Variant=v, VariantDescription=descs[v], FramesWithFace=found)
-                if v in NOT_FOR_SHARING or v in LOCAL_ONLY:
+                if v in NOT_FOR_SHARING:
                     extra.update(NotForSharing=True, Deidentified=False)
                 if v in MASK_STYLES + ("swap",):
                     extra["BystanderFacesMasked"] = int(np.sum(n_other)) if multi is not None else None

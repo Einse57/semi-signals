@@ -160,10 +160,11 @@ warp of a synthetic donor (OpenCV only). Third-party code, weights and donor ima
 fetch them from the official sources (GHOST release assets, InsightFace, LivePortrait, MediaPipe, OpenCV Zoo,
 SFHQ on Kaggle) and accept their terms yourself. See [docs/FACE_SWAP_LICENCES.md](docs/FACE_SWAP_LICENCES.md) for the licences and what each
 backend does not remove.
-In the launcher (Annotation mode Face or Both) and in the annotation panel ("De-ID export...") every face
-de-identification method can be chosen, previewed on one frame and exported: fill (default, shareable fallback),
-mosaic 8 / 16, Gaussian blur (local review only) and the swaps (GHOST by default, warp, LivePortrait; GHOST and
-LivePortrait behind a research-use acknowledgement). Details: [docs/SEGMENT_STORAGE.md](docs/SEGMENT_STORAGE.md#face-de-identification-in-the-ui-face-mode).
+In the launcher (Annotation mode Face or Both) and in the annotation panel ("De-ID export...") the face
+selector offers View: Original, and De-identify: Fill (default, the only shareable export) or GHOST (reduced
+risk, not de-identified; research use only, behind a research-use acknowledgement), each with a one-frame
+before/after preview. The other methods measured in phase 4 (mosaic, blur, warp, LivePortrait) are not in the
+UI. Details: [docs/SEGMENT_STORAGE.md](docs/SEGMENT_STORAGE.md#face-de-identification-in-the-ui-face-mode).
 
 Model weights are not in this repository. Details: [docs/SEIZURE_DETECTION.md](docs/SEIZURE_DETECTION.md),
 [docs/detector_a_results.md](docs/detector_a_results.md),

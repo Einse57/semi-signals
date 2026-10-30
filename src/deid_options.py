@@ -1,22 +1,24 @@
-"""Face de-identification methods offered in the UI (launcher face mode and the annotation panel).
+"""Face de-identification choices offered in the UI (launcher face mode and the annotation panel).
 
-One table for every method, so the launcher, the annotation tool and the export command show the same
-names, defaults and labels, and the export command (src/segment_export.py, the process the UI starts)
-checks the same rules again server-side instead of trusting the window.
+One table, so the launcher, the annotation tool and the export command show the same names, defaults and
+labels, and the export command (src/segment_export.py, the process the UI starts) checks the same rules
+again instead of trusting the window.
 
-Selector (two levels):
-- Method: fill (the default overall: the shareable fallback), mosaic8, mosaic16, gauss, or "swap".
-- Swap backend (only when "swap" is chosen): ghost (the default swap, src/deid_swap.DEFAULT_BACKEND), warp,
-  liveportrait.
+The UI offers only:
+- View: Original (the video as recorded; viewing and preview only, never exported from the selector).
+- De-identify: Fill (the default and the only shareable export) or GHOST (face swap, the default swap
+  backend src/deid_swap.DEFAULT_BACKEND).
 Labels (also written into the export sidecars as DeidentificationStatus):
 - fill: "shareable fallback (default)", the only method that may be exported for sharing.
-- mosaic8, warp, ghost, liveportrait: "reduced risk, not de-identified".
-- mosaic16: "not de-identifying" (provisional: still matched identity on 5 of 6 clips scored; final check
-  from the phase 4 results in docs/FACE_DEID_TRADEOFF.md).
-- gauss: "local review only"; written under --raw-root only, never into the export, never shareable.
-ghost and liveportrait need the research-use acknowledgement, passed on as research_use_acknowledged.
+- ghost: "reduced risk, not de-identified"; research use only, needs the research-use acknowledgement
+  (passed on as research_use_acknowledged, never saved between sessions).
 Third-party code and weights are not redistributed (docs/FACE_SWAP_LICENCES.md); when they are missing,
-missing_weights_message() says where to fetch them from.
+missing_weights_message() says where to fetch them from (GHOST's own download_models.sh).
+
+The other methods measured in phase 4 (mosaic8, mosaic16, Gaussian blur, warp, LivePortrait) stay in the
+experiment and measurement code (src/segment_export.mask_faces styles, the swap backends in
+src/deid_swap.py, the e2e scripts) and in docs/FACE_DEID_TRADEOFF.md; they are not offered in the UI and
+the UI export path (segment_export --deid-method) refuses them.
 
 No tkinter here (tested headless); the widgets are in src/deid_ui.py.
 """
@@ -27,90 +29,63 @@ from pathlib import Path
 from src.deid_swap import DEFAULT_BACKEND, DEID_STATUS, RESEARCH_ONLY
 
 ROOT = Path(__file__).resolve().parents[1]
+ORIGINAL = "original"
 SHAREABLE = "shareable fallback (default)"
-NOT_DEID = "not de-identifying"
-LOCAL_ONLY = "local review only"
-MOSAIC16_NOTE = ("provisional: still matched identity on 5 of 6 clips scored so far; the final check comes "
-                 "from the phase 4 results (docs/FACE_DEID_TRADEOFF.md)")
+ORIGINAL_LABEL = "original video, not de-identified: view and preview only, stays on this computer"
 
-# key: (group, UI title, status label, shareable, local_only, research_only)
+# key: (group, UI title, status label, shareable, research_only)
 METHODS = {
-    "fill": ("mask", "Fill (solid colour)", SHAREABLE, True, False, False),
-    "mosaic8": ("mask", "Mosaic, 8 blocks across the face", DEID_STATUS, False, False, False),
-    "mosaic16": ("mask", "Mosaic, 16 blocks across the face", NOT_DEID, False, True, False),
-    "gauss": ("mask", "Gaussian blur (sigma = face width / 6)", LOCAL_ONLY, False, True, False),
-    "ghost": ("swap", "GHOST face swap (default swap)", DEID_STATUS, False, False, True),
-    "warp": ("swap", "Warp of a synthetic donor", DEID_STATUS, False, False, False),
-    "liveportrait": ("swap", "LivePortrait reenactment", DEID_STATUS, False, False, True),
+    "fill": ("mask", "Fill (solid colour)", SHAREABLE, True, False),
+    "ghost": ("swap", "GHOST face swap", DEID_STATUS, False, True),
 }
-MASK_METHODS = tuple(k for k, v in METHODS.items() if v[0] == "mask")
-SWAP_METHODS = tuple(k for k, v in METHODS.items() if v[0] == "swap")
+MASK_METHODS = tuple(k for k, v in METHODS.items() if v[0] == "mask")      # ("fill",)
+SWAP_METHODS = tuple(k for k, v in METHODS.items() if v[0] == "swap")      # ("ghost",)
 DEFAULT_METHOD = "fill"                  # overall default: the shareable fallback
-DEFAULT_SWAP = DEFAULT_BACKEND           # "ghost": the default once a swap is chosen
-FAMILIES = MASK_METHODS + ("swap",)      # first selector level
-assert DEFAULT_SWAP in SWAP_METHODS and set(RESEARCH_ONLY) == {k for k, v in METHODS.items() if v[5]}
+DEFAULT_SWAP = DEFAULT_BACKEND           # "ghost": the only swap offered in the UI
+CHOICES = (ORIGINAL,) + tuple(METHODS)   # selector: View original | De-identify fill / ghost
+assert DEFAULT_SWAP == "ghost" and SWAP_METHODS == (DEFAULT_SWAP,) and DEFAULT_SWAP in RESEARCH_ONLY
 
 FACE_MODEL_HINT = "python scripts/fetch_models.py --face --skip-data --skip-vsvig"
-WARP_HINT = "python scripts/fetch_models.py --face-check --skip-data --skip-vsvig"
 LICENCES_DOC = "docs/FACE_SWAP_LICENCES.md"
+GHOST_DOWNLOAD = "https://github.com/ai-forever/ghost/blob/main/download_models.sh"
 OFFICIAL = {
     "ghost": ("GHOST code: https://github.com/ai-forever/ghost (pinned commit in " + LICENCES_DOC + ", 'Phase 3' > "
-              "'Third-party code'); weights with GHOST's own download_models.sh "
-              "(https://github.com/ai-forever/ghost/blob/main/download_models.sh): G_unet_2blocks.pth and "
-              "backbone.pth, sha256 pins in " + LICENCES_DOC + " 'Weights'"),
-    "liveportrait": ("LivePortrait code: https://github.com/KlingTeam/LivePortrait (pinned commit in " + LICENCES_DOC
-                     + "); weights: https://huggingface.co/KlingTeam/LivePortrait (sha256 pins in " + LICENCES_DOC
-                     + " 'Weights')"),
-    "warp": "the canonical face mesh (MediaPipe, Apache-2.0): " + WARP_HINT,
+              "'Third-party code'); weights with GHOST's own download_models.sh (" + GHOST_DOWNLOAD + "): "
+              "G_unet_2blocks.pth and backbone.pth, sha256 pins in " + LICENCES_DOC + " 'Weights'"),
 }
 
 
-def family_of(method: str) -> str:
-    return "swap" if method in SWAP_METHODS else method
-
-
-def resolve(family: str, swap: str | None = None) -> str:
-    """Selector state -> method. family "swap" without a backend gives DEFAULT_SWAP (ghost)."""
-    if family == "swap":
-        return swap if swap in SWAP_METHODS else DEFAULT_SWAP
-    if family not in METHODS:
-        raise ValueError(f"unknown de-identification method {family!r} ({', '.join(FAMILIES)})")
-    return family
+def check_choice(choice: str) -> str:
+    if choice not in CHOICES:
+        raise ValueError(f"unknown face view / de-identification choice {choice!r} (UI offers: {', '.join(CHOICES)})")
+    return choice
 
 
 def title(method: str) -> str:
-    return METHODS[method][1]
+    return "Original" if method == ORIGINAL else METHODS[method][1]
 
 
 def label(method: str) -> str:
     """The status label shown next to the selector and written to the sidecar."""
-    return METHODS[method][2]
+    return ORIGINAL_LABEL if method == ORIGINAL else METHODS[method][2]
 
 
 def is_shareable(method: str) -> bool:
-    return METHODS[method][3]
-
-
-def is_local_only(method: str) -> bool:
-    return METHODS[method][4]
+    return method in METHODS and METHODS[method][3]
 
 
 def needs_ack(method: str) -> bool:
-    return METHODS[method][5]
+    return method in METHODS and METHODS[method][4]
 
 
 def label_text(method: str) -> str:
     """One line for the UI: the label plus what it implies."""
     s = label(method)
+    if method == ORIGINAL:
+        return s
     if method == "fill":
         return s + ": the only method that may be exported for sharing"
-    if method == "mosaic16":
-        return f"{s} ({MOSAIC16_NOTE}); written to the local raw folder only"
-    if method == "gauss":
-        return s + ": written to the local raw folder only, never exported or shared"
-    if needs_ack(method):
-        return s + "; research use only: output stays on this computer"
-    return s + "; not for sharing"
+    return s + "; research use only: output stays on this computer, never shared"
 
 
 def missing_weights_message(method: str, problems=()) -> str:
@@ -122,8 +97,7 @@ def missing_weights_message(method: str, problems=()) -> str:
                      f"official sources and accept their terms ({LICENCES_DOC}): {OFFICIAL[method]}.")
         lines.append("Then point a swap configuration JSON at them (format: src/deid_swap.py) and choose it as "
                      "'Swap config'.")
-        if method == "ghost":
-            lines.append("No GHOST files? Choose Fill (the shareable fallback) or the warp swap instead.")
+        lines.append("No GHOST files? Choose Fill (the shareable fallback) instead.")
     else:
         lines.append(f"Fetch the MediaPipe face model with: {FACE_MODEL_HINT}")
     return "\n".join(lines)
@@ -135,7 +109,7 @@ def face_model_problems(models_dir: Path | None = None) -> list[str]:
 
 
 def swap_overrides(method: str, research_ack: bool) -> dict:
-    """Configuration values the UI choice sets: the backend, and the acknowledgement for research backends."""
+    """Configuration values the UI choice sets: the backend and the research-use acknowledgement."""
     o = {"backend": method}
     if needs_ack(method):
         o["research_use_acknowledged"] = bool(research_ack)
@@ -143,7 +117,7 @@ def swap_overrides(method: str, research_ack: bool) -> dict:
 
 
 def weights_problems(method: str, swap_config=None, models_dir: Path | None = None) -> list[str]:
-    """Missing files for a method ([] = ready). Swaps: the configuration's model, code and donor files (the
+    """Missing files for a choice ([] = ready). GHOST: the configuration's model, code and donor files (the
     research gate and the backend name are checked separately by validate_request)."""
     if method not in SWAP_METHODS:
         return face_model_problems(models_dir)
@@ -160,9 +134,12 @@ def weights_problems(method: str, swap_config=None, models_dir: Path | None = No
 
 def validate_request(method: str, *, research_ack: bool = False, shareable: bool = False,
                      swap_config_backend: str | None = None) -> list[str]:
-    """Server-side rules for one export request ([] = allowed)."""
+    """Rules for one export request from the UI ([] = allowed): only fill or ghost, only fill shareable,
+    ghost only with the research-use acknowledgement and a ghost configuration."""
+    if method == ORIGINAL:
+        return ["Original is for viewing only and is not exported from here; choose Fill or GHOST to export"]
     if method not in METHODS:
-        return [f"unknown de-identification method {method!r} (known: {', '.join(METHODS)})"]
+        return [f"{method!r} is not offered for export from the UI (only: {', '.join(METHODS)})"]
     err = []
     if shareable and not is_shareable(method):
         err.append(f"{method} is '{label(method)}' and cannot be exported for sharing; only fill is shareable")
@@ -175,7 +152,7 @@ def validate_request(method: str, *, research_ack: bool = False, shareable: bool
 
 
 def export_variants(method: str) -> list[str]:
-    """segment_export variants for a method: the image variant (swaps -> "swap") plus points."""
+    """segment_export variants for a method: the image variant (ghost -> "swap") plus points."""
     return ["swap" if method in SWAP_METHODS else method, "points"]
 
 
@@ -188,7 +165,9 @@ def default_dirs() -> tuple[Path, Path]:
 def export_cmd(video, method: str, *, python: str, annotations=None, out=None, raw_root=None, swap_config=None,
                research_ack: bool = False, shareable: bool = False, face_preprocess: str = "none",
                mode: str = "face") -> list[str]:
-    """The segment_export command the UI starts for one method (validated again by segment_export)."""
+    """The segment_export command the UI starts for fill or ghost (validated again by segment_export)."""
+    if method not in METHODS:
+        raise ValueError(validate_request(method)[0])
     d_out, d_raw = default_dirs()
     cmd = [python, "-u", "-m", "src.segment_export", "--input", str(video), "--out", str(out or d_out),
            "--raw-root", str(raw_root or d_raw), "--deid-method", method, "--mode", mode,
@@ -212,7 +191,10 @@ def preview_image(frame, method: str, lm, others=(), swapper=None, width: int = 
     import cv2
     import numpy as np
     from src.segment_export import mask_faces
-    if method in SWAP_METHODS:
+    check_choice(method)
+    if method == ORIGINAL:
+        after = frame.copy()
+    elif method in SWAP_METHODS:
         faces = ([lm] if lm is not None else []) + list(others)
         after = swapper.swap(frame, faces) if (swapper is not None and faces) else None
         if after is None:
@@ -230,21 +212,24 @@ def preview_image(frame, method: str, lm, others=(), swapper=None, width: int = 
     cv2.putText(out, "before", (6, size[1] + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (60, 60, 60), 1, cv2.LINE_AA)
     cv2.putText(out, f"after: {method}", (width + 14, size[1] + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (60, 60, 60), 1,
                 cv2.LINE_AA)
-    cv2.putText(out, label(method), (width + 14, size[1] + 38), cv2.FONT_HERSHEY_SIMPLEX, 0.5, col, 1, cv2.LINE_AA)
+    cap = "not de-identified" if method == ORIGINAL else label(method)
+    cv2.putText(out, cap, (width + 14, size[1] + 38), cv2.FONT_HERSHEY_SIMPLEX, 0.5, col, 1, cv2.LINE_AA)
     return out
 
 
 def preview_from_video(video, method: str, t: float | None = None, *, swap_config=None, research_ack=False,
                        models_dir: Path | None = None):
-    """Preview one frame of `video` (middle frame by default). Raises ValueError with the reason (missing
-    models, research gate) instead of running a method the export would refuse."""
+    """Preview one frame of `video` (middle frame by default). Raises ValueError with the reason (not
+    offered, missing models, research gate) instead of running something the export would refuse."""
     import cv2
-    err = validate_request(method, research_ack=research_ack)
-    if err:
-        raise ValueError("; ".join(err))
-    probs = face_model_problems(models_dir)
-    if probs:
-        raise ValueError(missing_weights_message(method, probs))
+    check_choice(method)
+    if method != ORIGINAL:
+        err = validate_request(method, research_ack=research_ack)
+        if err:
+            raise ValueError("; ".join(err))
+        probs = face_model_problems(models_dir)
+        if probs:
+            raise ValueError(missing_weights_message(method, probs))
     swapper = None
     if method in SWAP_METHODS:
         probs = weights_problems(method, swap_config, models_dir)
@@ -263,13 +248,15 @@ def preview_from_video(video, method: str, t: float | None = None, *, swap_confi
         cap.release()
     if not ok:
         raise ValueError(f"cannot read a frame from {video}")
-    from src.face_estimator import FaceEstimator
-    est = FaceEstimator(model_path=str(Path(models_dir or ROOT / "models") / "face_landmarker.task"))
-    try:
-        r = est.detect_image(frame)
-    finally:
-        est.close()
-    lm = r["landmarks"] if r is not None else None
+    lm = None
+    if method != ORIGINAL:
+        from src.face_estimator import FaceEstimator
+        est = FaceEstimator(model_path=str(Path(models_dir or ROOT / "models") / "face_landmarker.task"))
+        try:
+            r = est.detect_image(frame)
+        finally:
+            est.close()
+        lm = r["landmarks"] if r is not None else None
     try:
         return preview_image(frame, method, lm, swapper=swapper)
     finally:
