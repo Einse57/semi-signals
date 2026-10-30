@@ -153,7 +153,7 @@ Only use self-recorded or public clips. Other people's videos need their consent
    pip install torch --index-url https://download.pytorch.org/whl/cpu   :: only needed to convert VSViG once
    python scripts\fetch_models.py
    ```
-   This fills rtmlib's cache with the pose models (`%USERPROFILE%\.cache\rtmlib`), downloads VSViG-base from
+   (The conversion also needs `onnx`, which `requirements-demo.txt` installs.) This fills rtmlib's cache with the pose models (`%USERPROFILE%\.cache\rtmlib`), downloads VSViG-base from
    github.com/xuyankun/VSViG and converts it to `models\vsvig_base.xml/.bin` (only if missing or stale), and
    downloads Detector A (`models\detector_a_all.txt/.json`, plus the body-only `detector_a_body.txt/.json`) from
    https://huggingface.co/Einse57/semi-signals-detector-a at a pinned commit, all sha256-checked; hashes go in

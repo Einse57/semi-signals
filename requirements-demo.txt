@@ -5,6 +5,7 @@ onnxruntime>=1.17
 openvino>=2024.0
 rtmlib>=0.0.15
 lightgbm>=4.0
+onnx>=1.15     # only for the one-time VSViG conversion (with torch, see docs/SEIZURE_DETECTION.md)
 huggingface_hub>=0.23  # optional: fetch Detector A from the Hub
 scipy>=1.11
 pandas>=2.0
