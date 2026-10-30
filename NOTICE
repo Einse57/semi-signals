@@ -26,7 +26,12 @@ clips that are not included in this repository:
   https://doi.org/10.5281/zenodo.3625687, CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/).
   Intel IoT DevKit sample videos, Intel Corporation, https://github.com/intel-iot-devkit/sample-videos,
   CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/).
-Only numbers derived from the clips are included; no frames.
+Only numbers derived from the clips are included, plus one figure:
+  docs/figures/face_deid_grid_lwwy7p_fill_mosaic_blur.png, two frames (20 and 45) of GRID clip lwwy7p
+  (speaker s14), M. Cooke, J. Barker, S. Cunningham and X. Shao (2006), The GRID audio-visual speech corpus,
+  https://doi.org/10.5281/zenodo.3625687. Modified: face filled, pixelated or blurred, panels arranged and
+  captioned. The figure is licensed CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/), not MIT.
+  No other frames are included; no SFHQ donor images or face swaps.
 Optional face-check models fetched by scripts/fetch_models.py --face-check, not included: YuNet (OpenCV Zoo,
 MIT) and SFace (OpenCV Zoo, Apache-2.0). Optional face-swap backends (src/deid_ghost.py,
 src/deid_liveportrait.py) load third-party code and weights from a local location; none of it is included,

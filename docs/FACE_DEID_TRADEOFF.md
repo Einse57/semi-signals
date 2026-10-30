@@ -60,4 +60,29 @@ A clip counts as an identity match when it has at least 20 detected face pairs a
 - `mosaic8` (about 8 blocks across the face) and `gauss` (sigma = face width / 6) are measured baselines. Where they show a face with a high identity share on Intel, those are faces the landmarker missed, which every method leaves unchanged (as with `fill`).
 - `fill` removes the face: no face is found and no motion can be measured. It stays the shareable fallback and the default.
 - `warp`, `ghost` and `liveportrait` keep a face and are **reduced risk, not de-identified**; `ghost` and `liveportrait` are research use only and their outputs stay local. `ghost` is the default swap option (owner decision, 2026-10-29); `fill` stays the shareable fallback.
-- Stills of these outputs are not included in this repository.
+- The only still in this repository is Figure 1 (GRID frames: original, `fill`, mosaic and Gaussian blur; no
+  donor). Stills of `warp`, `ghost` and `liveportrait` outputs, and any image of an SFHQ donor or an
+  SFHQ-donor swap, are not included in this repository.
+
+### Figure 1: fill, mosaic and blur on a GRID frame
+
+![Figure 1: GRID lwwy7p frames 20 and 45, left to right original, fill, mosaic 8 blocks, mosaic 16 blocks, Gaussian blur](figures/face_deid_grid_lwwy7p_fill_mosaic_blur.png)
+
+Panels, left to right; top row frame 20, bottom row frame 45 of GRID clip `lwwy7p` (speaker s14).
+W = the face box width (W = 108 px on frame 20).
+
+1. **original**: the unmodified GRID frame.
+2. **fill**: the grown face hull filled with a flat colour; the shareable fallback and the default.
+3. **mosaic, 8 blocks** (`mosaic8`): square blocks of round(W / 8) px, about 8 blocks across the face;
+   **reduced risk, not de-identified**.
+4. **mosaic, 16 blocks** (`mosaic16`): square blocks of round(W / 16) px, about 16 blocks across the face;
+   **not de-identifying** (identity matched on 6 of 6 clips, see "Mosaic and blur per clip"). The caption
+   line inside the image reads "mosaic: reduced risk, not de-identified" for both mosaic panels; for
+   `mosaic16` the label in this legend applies.
+5. **Gaussian blur** (`gauss`): sigma = W / 6 px; **local review only**.
+
+Credit: frames from the GRID audio-visual speech corpus, M. Cooke, J. Barker, S. Cunningham and X. Shao
+(2006), speaker s14, clip `lwwy7p`, <https://doi.org/10.5281/zenodo.3625687>, licensed CC BY 4.0
+(<https://creativecommons.org/licenses/by/4.0/>). This image is a modified derivative of those frames (face
+filled, pixelated or blurred in panels 2 to 5; panels arranged and captioned) and is licensed CC BY 4.0, not
+under this repository's MIT licence. No synthetic (SFHQ) donor face or face swap appears in it.
