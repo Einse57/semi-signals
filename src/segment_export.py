@@ -601,7 +601,7 @@ def main(argv=None):
         if swapper is not None:
             swapper.close()
     append_mapping(mapping, rows)
-    print(f"[segment] {len(rows)} segment(s); de-identified: {out}; raw (local only): {raw_root}; mapping: {mapping}")
+    print(f"[segment] {len(rows)} segment(s); export: {out}; raw (local only): {raw_root}; mapping: {mapping}")
     if blocked:
         print(f"[fill check] NOT SHAREABLE: fill export of {', '.join(blocked)} is marked Shareable false "
               "(see UnmaskedFaceCheck in the fill sidecar)", flush=True)

@@ -88,13 +88,26 @@ def make_embedder(config_path=None) -> Embedder:
     return cls(cfg)
 
 
+def _quiet(make):
+    """Run make() with OpenCV warnings off (OpenCV 5 warns that DNN targets are not supported yet)."""
+    lg = getattr(getattr(cv2, "utils", None), "logging", None)
+    if lg is None:
+        return make()
+    old = lg.getLogLevel()
+    lg.setLogLevel(lg.LOG_LEVEL_ERROR)
+    try:
+        return make()
+    finally:
+        lg.setLogLevel(old)
+
+
 class YuNetDetector:
     """Face count with YuNet (OpenCV Zoo, MIT), cv2.FaceDetectorYN."""
     name = "YuNet (OpenCV Zoo)"
 
     def __init__(self, model_path, score=0.6):
         self.model_path, self.score, self._size = str(model_path), score, None
-        self.det = cv2.FaceDetectorYN.create(self.model_path, "", (320, 320), score, 0.3, 5000)
+        self.det = _quiet(lambda: cv2.FaceDetectorYN.create(self.model_path, "", (320, 320), score, 0.3, 5000))
 
     def detect(self, frame):
         h, w = frame.shape[:2]

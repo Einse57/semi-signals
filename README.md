@@ -8,10 +8,15 @@ Inspired by [VSViG (Xu et al., ECCV 2024)](https://arxiv.org/abs/2311.14775) but
 
 ```bash
 python -m venv .venv
-.venv\Scripts\activate          # Windows
-pip install -r requirements.txt
+.venv\Scripts\activate          # Windows (Linux/macOS: source .venv/bin/activate)
+pip install -r requirements-demo.txt
+pip uninstall -y opencv-contrib-python opencv-python-headless   # keep a single OpenCV package
+pip install --force-reinstall --no-deps opencv-python
 python -m src.run_live
 ```
+
+On Windows, `start.cmd` does the same setup for you (see [Seizure detection](#seizure-detection-research)).
+`requirements.txt` is the larger development set (install torch first, see its header).
 
 ### CLI Options
 
@@ -63,18 +68,28 @@ OpenVINO targets the iGPU via a monkey-patch in `config.py` (rtmlib's built-in O
 
 ```
 semi-signals/
-├── requirements.txt
+├── start.cmd, start.ps1     # Windows: set up .venv and open the launcher
+├── requirements-demo.txt    # demo and launcher
+├── requirements-dev.txt     # tests
+├── requirements.txt         # development set (torch installed separately)
 ├── src/
-│   ├── config.py            # Model URLs, device config, OpenVINO GPU patch
-│   ├── detector.py          # Person detection (YOLOX-tiny)
-│   ├── pose_estimator.py    # Body skeleton (RTMPose-m, COCO-17)
-│   ├── hand_estimator.py    # Hand pose (RTMPose-m, 21 kpts per hand)
-│   ├── motion.py            # Per-region velocity + finger blending
-│   ├── display.py           # Skeleton overlay + stacked motion charts
-│   ├── run_live.py          # Entry-point
+│   ├── run_live.py          # live body + hand tracking (entry point)
+│   ├── config.py            # model URLs, device config, OpenVINO GPU patch
+│   ├── detector.py, pose_estimator.py, hand_estimator.py   # YOLOX-tiny, RTMPose-m body and hand
+│   ├── motion.py, display.py                               # per-region motion, overlay and charts
+│   ├── face_estimator.py, face_preprocess.py, face_ov/     # optional face landmarks (MediaPipe / OpenVINO)
+│   ├── launcher.py, run_seizure_demo.py, review_video.py   # launcher, live viewer, annotation tool
+│   ├── detector_a/, detector_b/, fusion.py                 # seizure detectors
+│   ├── annotation.py, labels.py                            # ELAN .eaf / JSON annotations, label sets
+│   ├── segment_export.py, segment_store.py, fill_guard.py  # segment export and the fill check
+│   ├── points_export.py                                    # points-only export
+│   ├── deid_*.py                                           # de-identification methods, UI and checks
 │   └── JOINT_MAPPING.md     # VSViG joint mapping comparison
-├── tests/
-│   └── smoke_stage1.py
+├── scripts/fetch_models.py  # fetch and verify models and sample data
+├── labels/                  # body.json, face.json label sets
+├── docs/                    # setup, formats, results
+├── third_party/vsvig/       # vendored VSViG code (Apache-2.0)
+├── tests/                   # pytest (see Tests)
 └── README.md
 ```
 
@@ -172,13 +187,13 @@ clip, a landmarks-only clip, landmarks and blendshapes (netCDF, `movement` layou
 Face methods ([docs/FACE_DEID_TRADEOFF.md](docs/FACE_DEID_TRADEOFF.md)):
 
 - **Fill** (shareable default): faces painted one flat colour, with a YuNet box fallback for faces the
-  landmarker misses. YuNet then checks every output frame, fills any face it finds and checks again; a face
-  still found marks the export not shareable and lists the frames.
+  landmarker misses. YuNet then checks every output frame, fills any face it finds and checks again, then
+  checks the written video once more; a face still found marks the export not shareable and lists the frames.
 - **GHOST** face swap: reduced risk, not de-identified; research use only, behind an acknowledgement.
 - **Blur** (`--deid blur`): local review only. Mosaic16 is not de-identifying.
 
 The UI selector (launcher Face or Both mode, and "De-ID export..." in the annotation panel) offers Original,
-Fill and GHOST with a before/after preview. Next to it, the Landmarker picker lets me run the face landmarks on
+Fill and GHOST with a before/after preview. Next to it, the Landmarker picker lets you run the face landmarks on
 MediaPipe (CPU, the default) or OpenVINO on any device OpenVINO finds (CPU, GPU, NPU, AUTO); if a device
 doesn't load, it drops back to CPU with a note, and the export sidecar records the device it actually used.
 Third-party code, weights and donor images are not redistributed;
