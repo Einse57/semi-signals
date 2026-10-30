@@ -303,13 +303,13 @@ the two Intel clips' people 0.01 and 0.03. The SFace threshold stays 0.363.
 | warp, subject geometry | GRID | 100 % | 100 % | 0.46 (300; 100 %) | 0.32 (300; 82 %; 0 %) | 0.82 | 0.74 | 10.3 |
 | ghost (mesh donor) | GRID | 100 % | 100 % | 0.36 (300; 43 %) | 0.13 (300; 0 %; 0 %) | 0.78 | 0.68 | 356.8 |
 | liveportrait (mesh donor) | GRID | 100 % | 100 % | 0.27 (300; 1.7 %) | 0.13 (300; 0 %; 0 %) | 0.14 | 0.02 | 1798.2 |
-| original (landmarks: ms/frame) | Intel (1 clips, 1091 frames) | 42 % | 59 % | - | - | - | - | 37.6 |
-| fill | Intel | 0 % | 0.5 % | 0.81 (5; 100 %) | 0.79 (5; 100 %; 100 %) | (0 frames) | (0 frames) | 4.3 |
-| blur | Intel | 0 % | 7.8 % | 0.20 (87; 5.7 %) | 0.09 (87; 5.7 %; 5.7 %) | (8 frames) | (8 frames) | 8.5 |
-| warp, donor geometry | Intel | 43 % | 44 % | 0.20 (778; 0.6 %) | 0.15 (778; 1.9 %; 0.6 %) | 0.63 | 0.23 | 9.1 |
-| warp, subject geometry | Intel | 43 % | 44 % | 0.28 (778; 17 %) | 0.23 (778; 17 %; 0.6 %) | 0.55 | 0.30 | 8.5 |
-| ghost (mesh donor) | Intel | 43 % | 44 % | 0.26 (778; 6.2 %) | 0.14 (778; 1.4 %; 0.6 %) | 0.50 | 0.20 | 253.3 |
-| liveportrait (mesh donor) | Intel | 38 % | 43 % | 0.12 (627; 3.0 %) | 0.05 (627; 1.0 %; 0.8 %) | 0.15 | 0.01 | 1285.8 |
+| original (landmarks: ms/frame) | Intel (2 clips, 2810 frames) | 73 % | 84 % | - | - | - | - | 55.8 |
+| fill | Intel | 0.2 % | 0.7 % | 0.75 (19; 79 %) | 0.73 (19; 79 %; 79 %) | (19 frames) | (19 frames) | 3.3 |
+| blur | Intel | 20 % | 51 % | -0.01 (1970; 0.8 %) | 0.07 (1970; 1.0 %; 0.8 %) | 0.16 | -0.05 | 7.4 |
+| warp, donor geometry | Intel | 73 % | 73 % | 0.22 (3866; 5.7 %) | 0.11 (3866; 0.8 %; 0.4 %) | 0.50 | 0.29 | 14.6 |
+| warp, subject geometry | Intel | 73 % | 73 % | 0.29 (3909; 15 %) | 0.18 (3909; 4.5 %; 0.4 %) | 0.68 | 0.40 | 12.9 |
+| ghost (mesh donor) | Intel | 73 % | 73 % | 0.31 (3920; 31 %) | 0.13 (3920; 1.0 %; 0.4 %) | 0.55 | 0.41 | 1176.1 |
+| liveportrait (mesh donor) | Intel | 71 % | 70 % | 0.22 (3624; 2.2 %) | 0.10 (3624; 0.5 %; 0.4 %) | 0.18 | -0.01 | 3780.3 |
 
 Measured on the working machine (shared VM, 8 vCPU "Intel(R) Xeon(R) Processor", 15.6 GB RAM, no GPU,
 torch 2.15.0+cpu with 8 threads, onnxruntime 1.31.1, OpenCV 5.0.0) on GRID s14 clips bbad9n, bbae1p, bbae2a,
@@ -319,7 +319,7 @@ as in the phase 2 table; fill, blur and warp rows are the phase 2 renders of the
 (n = face pairs), thresholds 0.30 and 0.45. ms/frame = the method only; the landmark stage is listed on the
 "original" row. Frames where the subject's face is not found are filled whole-frame by every method.
 
-Intel: only face-demographics-walking-and-pause (1091 frames) is scored so far; head-pose-face-detection-female-and-male is still rendering and will be added.
+Intel: both clips scored (face-demographics-walking-and-pause, head-pose-face-detection-female-and-male).
 
 Observations:
 
