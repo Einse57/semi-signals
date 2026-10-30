@@ -2,25 +2,16 @@
 
 ## `face_deid_grid_lwwy7p_fill_mosaic_blur.png`
 
-Original, `fill`, `mosaic8`, `mosaic16` and Gaussian blur on two frames of one GRID clip (no donor, no
-swap). Used in [FACE_DEID_TRADEOFF.md](../FACE_DEID_TRADEOFF.md).
+GRID clip `lwwy7p` (speaker s14), frames 20 (top) and 45 (bottom); no donor, no swap. Used in
+[FACE_DEID_TRADEOFF.md](../FACE_DEID_TRADEOFF.md). W = face box width (108 px).
 
-Panels, left to right; top row frame 20, bottom row frame 45 of GRID clip `lwwy7p` (speaker s14).
-W = the face box width (W = 108 px on frame 20).
-
-1. **original**: the unmodified GRID frame.
-2. **fill**: the grown face hull filled with a flat colour; the shareable fallback and the default.
-3. **mosaic, 8 blocks** (`mosaic8`): square blocks of round(W / 8) px, about 8 blocks across the face;
-   **reduced risk, not de-identified**.
-4. **mosaic, 16 blocks** (`mosaic16`): square blocks of round(W / 16) px, about 16 blocks across the face;
-   **not de-identifying** (identity matched on 6 of 6 clips, see "Mosaic and blur per clip").
-5. **Gaussian blur** (`gauss`): sigma = W / 6 px; **local review only**.
+1. **original**
+2. **fill**: grown face hull, one flat colour; shareable default.
+3. **mosaic, 8 blocks**: W / 8 px blocks; reduced risk, not de-identified.
+4. **mosaic, 16 blocks**: W / 16 px blocks; not de-identifying.
+5. **Gaussian blur**: sigma W / 6; local review only.
 
 Credit: frames from the GRID audio-visual speech corpus, M. Cooke, J. Barker, S. Cunningham and X. Shao
-(2006), speaker s14, clip `lwwy7p`, <https://doi.org/10.5281/zenodo.3625687>, licensed CC BY 4.0
-(<https://creativecommons.org/licenses/by/4.0/>). This image is a modified derivative of those frames (face
-filled, pixelated or blurred in panels 2 to 5; panels arranged and captioned) and is licensed CC BY 4.0, not
-under this repository's MIT licence. No synthetic (SFHQ) donor face or face swap appears in it.
-
-Licence: CC BY 4.0 (derivative of GRID corpus frames), not MIT. See [NOTICE](../../NOTICE) and row 18a of
-[FACE_SWAP_LICENCES.md](../FACE_SWAP_LICENCES.md).
+(2006), <https://doi.org/10.5281/zenodo.3625687>, CC BY 4.0 (<https://creativecommons.org/licenses/by/4.0/>).
+Modified (face filled, pixelated or blurred; panels arranged and captioned). Licensed CC BY 4.0, not MIT. See
+[NOTICE](../../NOTICE) and row 18a of [FACE_SWAP_LICENCES.md](../FACE_SWAP_LICENCES.md).

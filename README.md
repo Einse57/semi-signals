@@ -148,23 +148,22 @@ biometric identifiers, so this reduces re-identification risk; it is not de-iden
 
 ### Segment export with video (provisional format)
 `python -m src.segment_export --input clip.mp4 --annotations clip.eaf --out <export> --raw-root <local raw folder>
-[--face-preprocess detect]` writes per annotated event a raw clip (kept under `--raw-root`, never in the
-export), a face-filled clip (faces painted with a solid colour) and a landmarks-only clip, face landmarks and blendshapes (netCDF, `movement`
-layout), BIDS-style `events.tsv` / `scans.tsv` and a private mapping CSV. File names follow the BIDS
-audio/video proposal BEP047, which is not part of the BIDS specification. The format is provisional and
-may change: [docs/SEGMENT_STORAGE.md](docs/SEGMENT_STORAGE.md). A blurred variant (`--deid blur`) is for local
-review only and is not for sharing. A face-swap variant (`--deid swap --swap-config ...`) is reduced risk, not
-de-identified (its sidecar says `Deidentified: false`); the face fill stays the shareable default and fallback.
-Its backends are GHOST (the default swap backend) and LivePortrait, both research use only, and a landmark-driven
-warp of a synthetic donor (OpenCV only). Third-party code, weights and donor images are not redistributed: you
-fetch them from the official sources (GHOST release assets, InsightFace, LivePortrait, MediaPipe, OpenCV Zoo,
-SFHQ on Kaggle) and accept their terms yourself. See [docs/FACE_SWAP_LICENCES.md](docs/FACE_SWAP_LICENCES.md) for the licences and what each
-backend does not remove.
-In the launcher (Annotation mode Face or Both) and in the annotation panel ("De-ID export...") the face
-selector offers View: Original, and De-identify: Fill (default, the only shareable export) or GHOST (reduced
-risk, not de-identified; research use only, behind a research-use acknowledgement), each with a one-frame
-before/after preview. The other methods measured in phase 4 (mosaic, blur, warp, LivePortrait) are not in the
-UI. Details: [docs/SEGMENT_STORAGE.md](docs/SEGMENT_STORAGE.md#face-de-identification-in-the-ui-face-mode).
+[--face-preprocess detect]` writes per annotated event a raw clip (under `--raw-root` only), a face-filled
+clip, a landmarks-only clip, landmarks and blendshapes (netCDF, `movement` layout), BIDS-style `events.tsv` /
+`scans.tsv` and a private mapping CSV. Names follow BEP047, a proposal, not part of BIDS. Provisional format:
+[docs/SEGMENT_STORAGE.md](docs/SEGMENT_STORAGE.md).
+
+Face methods ([docs/FACE_DEID_TRADEOFF.md](docs/FACE_DEID_TRADEOFF.md)):
+
+- **Fill** (shareable default): faces painted one flat colour, with a YuNet box fallback for faces the
+  landmarker misses. YuNet then checks every output frame; any face found marks the export not shareable and
+  lists the frames.
+- **GHOST** face swap: reduced risk, not de-identified; research use only, behind an acknowledgement.
+- **Blur** (`--deid blur`): local review only. Mosaic16 is not de-identifying.
+
+The UI selector (launcher Face or Both mode, and "De-ID export..." in the annotation panel) offers Original,
+Fill and GHOST with a before/after preview. Third-party code, weights and donor images are not redistributed;
+you fetch them yourself: [docs/FACE_SWAP_LICENCES.md](docs/FACE_SWAP_LICENCES.md).
 
 Model weights are not in this repository. Details: [docs/SEIZURE_DETECTION.md](docs/SEIZURE_DETECTION.md),
 [docs/detector_a_results.md](docs/detector_a_results.md),

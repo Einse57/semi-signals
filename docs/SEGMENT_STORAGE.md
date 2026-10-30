@@ -69,18 +69,11 @@ face preprocessing mode.
 `*_blendshapes.nc`: `blendshapes` (time, blendshape = 52), named by MediaPipe category (`_neutral`,
 `browDownLeft`, ...).
 
-**Why netCDF.** A 478-keypoint 3D `movement` dataset was saved with `xarray.Dataset.to_netcdf` and
-reloaded with `xarray.open_dataset`; values, NaN positions, coordinates and attributes came back identical
-with the netCDF4, h5netcdf and scipy engines, and `movement.kinematics.compute_speed` ran on the reloaded
-data (movement 0.17.0). `movement.io.load` has no netCDF reader, so files are opened with xarray. When
-xarray or netCDF4 is missing, `segment_store` writes `.npz` with the same arrays and dimension names
-(`dims_position`, `dims_confidence`). semi-signals itself needs only xarray + netCDF4; `movement` is
-optional (install it in a separate environment: one of its dependencies, `sleap-io`, installs a top-level
-`tests` package that shadows a project's own `tests` folder).
+netCDF round-trips through xarray (`xarray.open_dataset`; `movement.io.load` has no netCDF reader). Without
+xarray / netCDF4, `segment_store` writes `.npz` with the same arrays and dimension names. `movement` is
+optional; install it in a separate environment (its dependency `sleap-io` installs a top-level `tests` package).
 
-**NWB.** An NWB / `ndx-pose` export is not implemented (`segment_store.to_nwb` raises
-`NotImplementedError`). The `movement` layout maps onto `ndx-pose` `PoseEstimationSeries` per keypoint if
-it is added later.
+**NWB.** Not implemented (`segment_store.to_nwb` raises `NotImplementedError`).
 
 ## Events
 
@@ -107,45 +100,31 @@ in the private mapping.
 | `desc` | Tree | Content |
 |---|---|---|
 | `raw` | raw only | the source frames of the segment |
-| `fill` | export (default) | face areas painted with their mean colour: the subject's landmark hull grown by 25 %, plus every other face the landmarker finds (whole frame + four tiles; `--no-bystanders` turns this off). Frames without the subject's face are filled whole (`--missing-face frame`, default) |
-| `swap` | export (opt-in) | REDUCED RISK, NOT DE-IDENTIFIED: face swap to a donor face (`--deid swap`; `ghost` is accepted as an alias). Needs `--swap-config` with a licence-reviewed backend and a licensed donor, and exits with an error otherwise. Backends: `ghost` (the default swap backend, used when the configuration names none) and `liveportrait` (research use only; need `research_use_acknowledged`; code and weights outside the repository). `warp`: landmark-driven warp of a synthetic donor. The subject's face outline, hair, skin colour, head pose and expression remain, and an identity check still finds partial similarity (see [FACE_SWAP_LICENCES.md](FACE_SWAP_LICENCES.md)). Sidecar: `Deidentified: false`, `DeidentificationStatus: "reduced risk, not de-identified"`, `SwapBackend`, `SwapDonorLicence`, and `ResearchUseOnly: true` for ghost and liveportrait. Not a shareable default |
-| `blur` | raw only (opt-in) | **local review only, not for sharing.** Face areas pixelated and blurred. Written under `--raw-root`; `--blur-in-export` puts it in the export, with `NotForSharing: true` and `Deidentified: false` in its sidecar |
+| `fill` | export (default) | face areas painted with their mean colour: the subject's landmark hull grown by 25 %, every other face the landmarker finds (`--no-bystanders` turns this off), and every YuNet face no landmark mask covers (box padded 20 %, `--fallback-pad`). Frames without the subject's face are filled whole (`--missing-face frame`, default). Then YuNet checks every output frame (score >= 0.6, `--yunet-score`): any face found marks the export not shareable and lists the frames in `UnmaskedFaceCheck`. Without the YuNet model (`--yunet-model`), fill runs on landmarks only and is not marked shareable |
+| `swap` | export (opt-in) | **reduced risk, not de-identified**: face swap to a donor (`--deid swap --swap-config swap.json`). Backends `ghost` (default) and `liveportrait` (research use only, need `research_use_acknowledged`) and `warp`. Sidecar: `Deidentified: false`, `DeidentificationStatus`, `SwapBackend`, `SwapDonorLicence`, `ResearchUseOnly` |
+| `blur` | raw only (opt-in) | **local review only, not for sharing.** Written under `--raw-root`; `--blur-in-export` puts it in the export with `NotForSharing: true`, `Deidentified: false` |
 | `points` | export | the subject's landmarks drawn on a black canvas, no image content |
 
-Each video sidecar records the variant, the number of frames with a face, the number of bystander faces
-masked (`BystanderFacesMasked`), the preprocessing mode and `Deidentified`; the blur variant also has
-`NotForSharing`.
-
-Variants chosen with `--deid-method fill` or `--deid-method ghost` (the face selector in the UI, below) also
-carry `DeidentificationStatus` (the UI label) and `Shareable` (true only for `fill`).
+Each video sidecar records the variant, frames with a face, `BystanderFacesMasked`, the preprocessing mode
+and `Deidentified`. With `--deid-method fill|ghost` it also has `DeidentificationStatus` and `Shareable`
+(true only for a fill export that passed the unmasked-face check; otherwise `ShareableBlockedReason`).
+`--shareable` exits with code 3 when the check blocks it.
 
 ## Face de-identification in the UI (face mode)
 
-The launcher (Annotation mode Face or Both) and the annotation panel ("De-ID export...", face and both
-modes) have the same selector (`src/deid_ui.py`; names, labels and rules in `src/deid_options.py`). It
-offers only:
+The launcher (Annotation mode Face or Both) and the annotation panel ("De-ID export...") offer:
 
-- **View: Original**: the video as recorded, "not de-identified"; for viewing and the preview only, never
-  exported from the selector.
-- **De-identify: Fill** (default): label "shareable fallback (default)"; the only choice that can be
-  exported for sharing ("Export for sharing" can only be ticked with Fill).
-- **De-identify: GHOST** (face swap): label "reduced risk, not de-identified"; research use only.
-  - **Research-use acknowledgement**: without it the export and preview refuse; it is passed to the backend
-    as `research_use_acknowledged` (`--research-use-acknowledged`) and replaces the configuration file's
-    value. It is not saved between sessions.
-  - **Missing weights**: the selector says what is missing and where to fetch it: GHOST's own
-    `download_models.sh` (https://github.com/ai-forever/ghost/blob/main/download_models.sh) and
-    [FACE_SWAP_LICENCES.md](FACE_SWAP_LICENCES.md). Nothing is redistributed or downloaded automatically.
-- **Preview (before/after)**: one frame of the video (middle frame) before and after the choice, nothing
-  saved.
-
-The other methods measured in phase 4 (mosaic 8 / 16, Gaussian blur, warp, LivePortrait; see
-[FACE_DEID_TRADEOFF.md](FACE_DEID_TRADEOFF.md)) stay in the measurement code and are not offered in the UI.
+- **View: Original**: not de-identified; viewing and preview only.
+- **De-identify: Fill** (default): "shareable fallback (default)"; the only choice that can be exported for
+  sharing. The log shows the unmasked-face check result, and a NOT SHAREABLE line with the frame list when
+  it fails. Without the YuNet model the selector says so and sharing is blocked.
+- **De-identify: GHOST**: "reduced risk, not de-identified"; research use only, behind a research-use
+  acknowledgement (not saved). Missing weights are listed with GHOST's `download_models.sh`
+  (https://github.com/ai-forever/ghost/blob/main/download_models.sh).
+- **Preview (before/after)**: the middle frame, nothing saved.
 
 Export runs `python -m src.segment_export ... --deid-method fill|ghost` into `~/semi-signals-local/export`
-(raw into `~/semi-signals-local/raw`). segment_export accepts only `fill` or `ghost` on this path and checks
-the shareable rule (fill only), the acknowledgement (ghost) and the configuration's backend again, and exits
-with the reason before writing anything.
+(raw into `~/semi-signals-local/raw`) and checks the same rules again before writing.
 
 ## Sidecar fields (custom)
 
@@ -163,17 +142,14 @@ outside `--out` (checked). Keep it with the source videos.
 
 - Blur does not de-identify: on the test clips the landmarker still detected a face in 9-60 % of blurred
   frames, so blur is for local review only. On the same clips it detected no face in filled frames.
-- Fill and blur only cover faces the landmarker finds; faces it never finds (small, turned away, occluded)
-  are not masked. Check every de-identified clip before sharing.
+- Fill covers faces the landmarker or YuNet finds; the unmasked-face check uses the same detector, so a face
+  both miss is not caught. Check every clip before sharing.
 - Landmarks, blendshapes and landmark-only video can be biometric identifiers (HIPAA, GDPR, state
   biometric laws).
 - Body, clothing, voice (if audio is added), room and timing can identify a person.
-- Face swapping (`--deid swap`) is reduced risk, not de-identification, with every backend (`warp`, and the
-  research-only `ghost` and `liveportrait`). The licence audit and measurements are in
-  [FACE_SWAP_LICENCES.md](FACE_SWAP_LICENCES.md). The check harness `python -m src.deid_check` reports the
-  detector hit rate (MediaPipe, YuNet with `--yunet`), identity similarity (SFace; ArcFace when a local
-  research-only model is configured) and landmark and blendshape motion correlation between original and
-  de-identified clips.
+- Face swapping is reduced risk, not de-identification, with every backend. `python -m src.deid_check`
+  reports detector hit rate, identity similarity and motion correlation between original and output.
+  Licences: [FACE_SWAP_LICENCES.md](FACE_SWAP_LICENCES.md).
 
 ## Test data used during development (not in this repository)
 
