@@ -166,6 +166,11 @@ Face methods ([docs/FACE_DEID_TRADEOFF.md](docs/FACE_DEID_TRADEOFF.md)):
 The UI selector (launcher Face or Both mode, and "De-ID export..." in the annotation panel) offers Original,
 Fill and GHOST with a before/after preview. Third-party code, weights and donor images are not redistributed;
 you fetch them yourself: [docs/FACE_SWAP_LICENCES.md](docs/FACE_SWAP_LICENCES.md).
+`python scripts/fetch_models.py --ghost --accept-ghost-licences --skip-data --skip-vsvig` fetches the GHOST
+code (Apache-2.0) and four files from the GHOST GitHub releases, sha256-checked, into the git-ignored
+`third_party_local/`: the generator (Apache-2.0), InsightFace `backbone.pth` and `glintr100.onnx`
+(non-commercial research only) and `iresnet.py` (MIT). Without `--accept-ghost-licences` it asks first and
+fetches nothing unless you answer `y`. Donor images are not fetched.
 
 Model weights are not in this repository. Details: [docs/SEIZURE_DETECTION.md](docs/SEIZURE_DETECTION.md),
 [docs/detector_a_results.md](docs/detector_a_results.md),

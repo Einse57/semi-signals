@@ -11,10 +11,10 @@ No SFHQ images or SFHQ-donor swaps are in this repository. The only media in it 
 
 | # | Component | Source | Licence | In this repository |
 |---|---|---|---|---|
-| 1 | GHOST code (AEI-Net, `network/`) | <https://github.com/ai-forever/ghost> | Apache-2.0 | not redistributed / fetched by user; adapter `src/deid_ghost.py` only |
-| 2 | GHOST generator `G_unet_2blocks.pth` | <https://github.com/sberbank-ai/sber-swap/releases/tag/sber-swap-v2.0> (via GHOST `download_models.sh`) | Apache-2.0 (repository licence; release has no separate text); trained on VGGFace2 (non-commercial research) | not redistributed / fetched by user |
-| 3 | InsightFace ArcFace `backbone.pth` (GHOST source identity) | <https://github.com/sberbank-ai/sber-swap/releases/tag/arcface>; terms: <https://github.com/deepinsight/insightface#license> | non-commercial research only | not redistributed / fetched by user |
-| 4 | InsightFace `glintr100.onnx` (ArcFace scorer in `src/deid_check.py`) | <https://github.com/sberbank-ai/sber-swap/releases/tag/antelope>; terms: <https://github.com/deepinsight/insightface/tree/master/model_zoo> | non-commercial research only | not redistributed / fetched by user |
+| 1 | GHOST code (AEI-Net, `network/`) | <https://github.com/ai-forever/ghost> | Apache-2.0 | not redistributed / fetched by user (`--ghost`); adapter `src/deid_ghost.py` only |
+| 2 | GHOST generator `G_unet_2blocks.pth` | <https://github.com/ai-forever/ghost/releases/tag/sber-swap-v2.0> | Apache-2.0 (repository licence; release has no separate text); trained on VGGFace2 (non-commercial research) | not redistributed / fetched by user (`--ghost`) |
+| 3 | InsightFace ArcFace `backbone.pth` + `iresnet.py` (GHOST source identity) | <https://github.com/ai-forever/ghost/releases/tag/arcface>; terms: <https://github.com/deepinsight/insightface#license> | model: non-commercial research only; `iresnet.py`: MIT | not redistributed / fetched by user (`--ghost`) |
+| 4 | InsightFace `glintr100.onnx` (ArcFace scorer in `src/deid_check.py`) | <https://github.com/ai-forever/ghost/releases/tag/antelope>; terms: <https://github.com/deepinsight/insightface/tree/master/model_zoo> | non-commercial research only | not redistributed / fetched by user (`--ghost`) |
 | 5 | InsightFace buffalo_l `det_10g.onnx`, `2d106det.onnx` (bundled with LivePortrait, not loaded) | <https://huggingface.co/KlingTeam/LivePortrait> | non-commercial research only | not redistributed / fetched by user |
 | 7 | SPADE-derived parts (LivePortrait decoder) | <https://github.com/NVlabs/SPADE> | CC BY-NC-SA 4.0 | not redistributed / fetched by user |
 | 8 | LivePortrait code | <https://github.com/KlingTeam/LivePortrait> | MIT (with SPADE / face vid2vid derived parts) | not redistributed / fetched by user; adapter `src/deid_liveportrait.py` only |
@@ -55,6 +55,17 @@ people.
 Third-party checkouts: GHOST `44e58aad8600ee83ad4c8213aaa9698ccaf66c1c`, LivePortrait
 `9b294b3d0536135442ea73cb01e6cb3ca7029dd3`, both in the git-ignored `third_party_local/`. Detection and
 landmarks in both adapters come from MediaPipe.
+
+## Fetching GHOST
+
+`python scripts/fetch_models.py --ghost --accept-ghost-licences --skip-data --skip-vsvig` clones GHOST at the
+commit above into `third_party_local/ghost` and downloads `G_unet_2blocks.pth`, `backbone.pth`, `iresnet.py`
+and `glintr100.onnx` from <https://github.com/ai-forever/ghost/releases> into `third_party_local/weights/ghost`,
+each checked against the sha256 above (a mismatch is deleted and reported). `iresnet.py` is InsightFace code
+(MIT). Without `--accept-ghost-licences` the script lists each file's source and licence and asks; any answer
+other than `y`, or no terminal, fetches nothing and exits with code 2. `--ghost-dir` picks another location;
+`ghost_models.json` there holds the paths for the `ghost` and `arcface` configurations. Donor images are not
+fetched.
 
 ## Labels
 

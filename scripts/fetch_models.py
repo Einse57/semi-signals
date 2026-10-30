@@ -8,6 +8,7 @@
   python scripts/fetch_models.py --skip-data           # models only
   python scripts/fetch_models.py --face --skip-data    # also the optional MediaPipe face model
   python scripts/fetch_models.py --face-check --skip-data --skip-vsvig   # de-identification check and warp files
+  python scripts/fetch_models.py --ghost --accept-ghost-licences --skip-data --skip-vsvig   # GHOST swap (research use)
 
 What it does:
 1. Pose models (YOLOX-tiny, RTMPose-m body7 and hand5): downloads them into rtmlib's own cache
@@ -28,6 +29,10 @@ What it does:
 6. Optional (--face-check): files for the de-identification check and the warp face swap, pinned and
    sha256-checked: YuNet face detector (OpenCV Zoo, MIT), SFace face recognizer (OpenCV Zoo, Apache-2.0)
    and the MediaPipe canonical face mesh (Apache-2.0). See docs/FACE_SWAP_LICENCES.md.
+7. Optional (--ghost): the GHOST face swap, research use only. Clones github.com/ai-forever/ghost at a pinned
+   commit and downloads four files from its GitHub releases, sha256-checked, into --ghost-dir
+   (default ./third_party_local, git-ignored). Needs --accept-ghost-licences or a "y" at the prompt; without
+   it nothing is fetched and the script exits with code 2.
 
 Hashes of everything in --models-dir are recorded in `<models-dir>/MANIFEST.json` (sample data under "data").
 Works on Windows, macOS and Linux. Model files are not part of the repository.
@@ -407,6 +412,95 @@ def step_face_check(a, md: Path, man: Manifest, status):
     status["face-check"] = "ok" if not bad else "FAILED: " + "; ".join(bad)
 
 
+# ── 7. GHOST face swap (optional, research use only) ─────────
+GHOST_REPO = "https://github.com/ai-forever/ghost"
+GHOST_COMMIT = "44e58aad8600ee83ad4c8213aaa9698ccaf66c1c"
+GHOST_REL = GHOST_REPO + "/releases/download/"
+GHOST_FILES = {  # name: (url, sha256, licence)
+    "G_unet_2blocks.pth": (GHOST_REL + "sber-swap-v2.0/G_unet_2blocks.pth",
+        "85f130421c65722927c47502ea1b28b62be4893ca9180fec735b67be1e5edd8d", "Apache-2.0 (GHOST repository licence)"),
+    "backbone.pth": (GHOST_REL + "arcface/backbone.pth",
+        "a566a62357f0c55b679d9ff2f022a294486568be0c00665d39029d0e46a8109b", "InsightFace model: non-commercial research only"),
+    "iresnet.py": (GHOST_REL + "arcface/iresnet.py",
+        "990006bfcd6583bdc9775045dfe02cbb10904018c0c34825f05d9cdd834fd388", "InsightFace code: MIT"),
+    "glintr100.onnx": (GHOST_REL + "antelope/glintr100.onnx",
+        "4ab1d6435d639628a6f3e5008dd4f929edf4c4124b1a7169e1048f9fef534cdf", "InsightFace model: non-commercial research only"),
+}
+GHOST_NOTICE = f"""GHOST face swap files (research use only, not redistributed by this repository):
+  {"code":<20s}{GHOST_REPO} @ {GHOST_COMMIT[:12]}  Apache-2.0
+""" + "".join(f"  {n:<20s}{u}\n  {"":<20s}{lic}\n" for n, (u, _, lic) in GHOST_FILES.items()) + """\
+  InsightFace terms (models non-commercial research only): https://github.com/deepinsight/insightface#license
+  The GHOST generator was trained on VGGFace2. Swaps made with these files are reduced risk,
+  not de-identified, and stay local. See docs/FACE_SWAP_LICENCES.md."""
+
+
+def ghost_acknowledged(a, ask=None) -> bool:
+    """True only with --accept-ghost-licences or a "y" answer on an interactive terminal."""
+    if a.accept_ghost_licences:
+        return True
+    print(GHOST_NOTICE)
+    if not sys.stdin.isatty():
+        return False
+    try:
+        return (ask or input)("Accept these licences and fetch the GHOST files? [y/N] ").strip().lower() in ("y", "yes")
+    except EOFError:
+        return False
+
+
+def clone_ghost(dst: Path):
+    if (dst / ".git").exists():
+        head = subprocess.run(["git", "-C", str(dst), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+        if head != GHOST_COMMIT:
+            raise RuntimeError(f"{dst} is at {head[:12] or '?'}, not {GHOST_COMMIT[:12]}; move it away and run again")
+        return "present"
+    dst.mkdir(parents=True, exist_ok=True)
+    for cmd in (["init", "-q"], ["remote", "add", "origin", GHOST_REPO + ".git"],
+                ["fetch", "-q", "--depth", "1", "origin", GHOST_COMMIT], ["checkout", "-q", "FETCH_HEAD"]):
+        subprocess.run(["git", "-C", str(dst), *cmd], check=True)
+    head = subprocess.run(["git", "-C", str(dst), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    if head != GHOST_COMMIT:
+        raise RuntimeError(f"cloned {head[:12]}, expected {GHOST_COMMIT[:12]}")
+    return "cloned"
+
+
+def step_ghost(a, status):
+    gd = Path(a.ghost_dir).expanduser().resolve()
+    wd = gd / "weights" / "ghost"
+    print(f"[7] GHOST face swap (optional, research use only) -> {gd}")
+    bad = []
+    if a.offline:
+        ok = (gd / "ghost" / ".git").exists()
+        if not ok:
+            bad.append("ghost checkout missing")
+    else:
+        try:
+            print(f"    {clone_ghost(gd / 'ghost')}  ghost @ {GHOST_COMMIT[:12]}")
+        except Exception as e:  # noqa: BLE001
+            bad.append(f"ghost code: {e}")
+    for name, (url, want, lic) in GHOST_FILES.items():
+        dst = wd / name
+        if ok_file(dst, want) and not (a.force and not a.offline):
+            print(f"    ok  {name} ({lic})"); continue
+        if a.offline:
+            bad.append(f"{name} missing or sha256 mismatch"); continue
+        try:
+            download(url, dst)
+        except Exception as e:  # noqa: BLE001
+            bad.append(f"{name}: {e}"); continue
+        h = sha256(dst)
+        if h != want:
+            dst.unlink()
+            bad.append(f"{name} sha256 mismatch ({h[:12]}...), removed"); continue
+        print(f"    ok  {name} (downloaded, sha256 verified; {lic})")
+    if not bad:
+        cfg = {"models": {"code": str(gd / "ghost"), "generator": str(wd / "G_unet_2blocks.pth"),
+                          "id_embedder": str(wd / "backbone.pth")},       # "models" block of the ghost config
+               "arcface_model": str(wd / "glintr100.onnx")}               # "model" of the deid_check arcface config
+        (gd / "ghost_models.json").write_text(json.dumps(cfg, indent=2) + "\n")
+        print(f"    local paths for the ghost and arcface configs: {gd / 'ghost_models.json'}")
+    status["ghost"] = "ok" if not bad else "FAILED: " + "; ".join(bad)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--models-dir", default=str(ROOT / "models"))
@@ -421,7 +515,16 @@ def main(argv=None):
     ap.add_argument("--face", action="store_true", help="also fetch the optional MediaPipe face model")
     ap.add_argument("--face-check", action="store_true",
                     help="also fetch YuNet, SFace and the canonical face mesh (de-identification check and warp)")
+    ap.add_argument("--ghost", action="store_true",
+                    help="also fetch the GHOST face swap code and weights (research use only; needs the licence acknowledgement)")
+    ap.add_argument("--accept-ghost-licences", action="store_true",
+                    help="accept the GHOST (Apache-2.0) and InsightFace (non-commercial research) licences without a prompt")
+    ap.add_argument("--ghost-dir", default=str(ROOT / "third_party_local"),
+                    help="where the GHOST checkout and weights go (default ./third_party_local, git-ignored)")
     a = ap.parse_args(argv)
+    if a.ghost and not ghost_acknowledged(a):
+        print("GHOST licences not accepted: nothing fetched. Run again with --accept-ghost-licences.", file=sys.stderr)
+        return 2
     md = Path(a.models_dir).expanduser().resolve(); md.mkdir(parents=True, exist_ok=True)
     man = Manifest(md / "MANIFEST.json")
     status = {}
@@ -439,6 +542,8 @@ def main(argv=None):
         step_face(a, md, man, status)
     if a.face_check:
         step_face_check(a, md, man, status)
+    if a.ghost:
+        step_ghost(a, status)
     man.save()
     print("\nSummary (models dir: %s)" % md)
     for k, v in status.items():
