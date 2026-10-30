@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 
 from src.face_ov import geometry as G
-from src.face_ov.bundle import MODEL_FILES, unpack_task
+from src.face_ov.bundle import BUNDLE_FILES, unpack_task
 
 TASK = Path(__file__).resolve().parent.parent / "models" / "face_landmarker.task"
 
@@ -135,7 +135,7 @@ def test_one_euro_first_frame_passthrough_and_static_smoothing():
 def test_unpack_task_checks_sha(tmp_path):
     task = tmp_path / "x.task"
     with zipfile.ZipFile(task, "w") as z:
-        for n in MODEL_FILES:
+        for n in BUNDLE_FILES:
             z.writestr(n, b"tflite " + n.encode())
     paths = unpack_task(task, out_dir=tmp_path / "cache")
     assert all(p.read_bytes().startswith(b"tflite") for p in paths.values())
@@ -204,3 +204,161 @@ def test_parity_pipeline_vs_mediapipe():
             bs = np.array([c.score for c in sorted(r.face_blendshapes[0], key=lambda c: c.index)])
             bsd.append(np.abs(bs - o.blendshapes).mean())
     assert errs and np.mean(errs) < 0.01 and np.mean(bsd) < 0.01
+
+
+# ---- multi-face, blendshapes off, transformation matrix, backend selection (no model needed) ---------
+def _rot(ax, ay, az):
+    cx, sx, cy, sy, cz, sz = math.cos(ax), math.sin(ax), math.cos(ay), math.sin(ay), math.cos(az), math.sin(az)
+    rx = np.array([[1, 0, 0], [0, cx, -sx], [0, sx, cx]])
+    ry = np.array([[cy, 0, sy], [0, 1, 0], [-sy, 0, cy]])
+    rz = np.array([[cz, -sz, 0], [sz, cz, 0], [0, 0, 1]])
+    return rz @ ry @ rx
+
+
+def _angle_deg(a, b):
+    return math.degrees(math.acos(np.clip((np.trace(a.T @ b) - 1) / 2, -1, 1)))
+
+
+def test_rect_iou():
+    a = G.Rect(0.5, 0.5, 0.2, 0.2, 0.0)
+    assert G.rect_iou(a, a) == pytest.approx(1.0)
+    assert G.rect_iou(a, G.Rect(0.9, 0.9, 0.1, 0.1, 0.0)) == 0.0
+    assert G.rect_iou(a, G.Rect(0.6, 0.5, 0.2, 0.2, 1.0)) == pytest.approx(1 / 3)   # rotation ignored
+
+
+def test_weighted_orthogonal_procrustes_recovers_similarity():
+    from src.face_ov.face_geometry import solve_weighted_orthogonal
+    rng = np.random.default_rng(3)
+    src = rng.normal(size=(3, 50))
+    R, t, s = _rot(0.3, -0.5, 0.2), np.array([1.0, -2.0, 3.0]), 1.7
+    m = solve_weighted_orthogonal(src, s * R @ src + t[:, None], rng.uniform(0.1, 1, 50))
+    np.testing.assert_allclose(m[:3, :3], s * R, atol=1e-9)
+    np.testing.assert_allclose(m[:3, 3], t, atol=1e-9)
+    np.testing.assert_allclose(m[3], [0, 0, 0, 1])
+
+
+def test_transform_matrix_shape_orthonormal_and_pose():
+    from src.face_ov.face_geometry import FaceGeometry
+    rng = np.random.default_rng(0)
+    g = FaceGeometry.__new__(FaceGeometry)                 # synthetic canonical mesh, no model bundle
+    g.canonical, g.weights, g.fov, g.near = rng.normal(0, 5, (3, 468)), np.full(468, 1 / 468), 63.0, 1.0
+    w, h = 640, 480
+    for ang in ((0, 0, 0), (0.17, 0.35, 0.09), (-0.44, 0.26, -0.17)):
+        R = _rot(*ang)
+        p = R @ g.canonical
+        lm = np.stack([0.5 + p[0] / 60, 0.5 - p[1] / 60 * w / h, -p[2] / 60], 1)
+        m = g.transform(lm, w, h)
+        assert m.shape == (4, 4) and m.dtype == np.float32
+        np.testing.assert_allclose(m[3], [0, 0, 0, 1])
+        rn = m[:3, :3] / np.linalg.norm(m[:3, :3], axis=0)
+        np.testing.assert_allclose(rn.T @ rn, np.eye(3), atol=1e-5)
+        assert np.linalg.det(rn) == pytest.approx(1.0, abs=1e-5)
+        assert _angle_deg(rn, R) < 1.0
+        assert m[2, 3] < 0                                 # face in front of the camera (-z)
+    assert g.transform(np.full((478, 3), 0.5), w, h) is None   # degenerate landmarks
+
+
+def _stub_landmarker(num_faces, video=True, blendshapes=False):
+    """FaceLandmarkerOV with its three models replaced by stubs: landmarks fill the ROI."""
+    from src.face_ov.landmarker import FaceLandmarkerOV
+    est = object.__new__(FaceLandmarkerOV)
+    est.video, est.num_faces, est.smooth, est.blendshapes = video, num_faces, False, blendshapes
+    est.min_track, est.min_pres, est.geometry = 0.5, 0.5, None
+    est.reset()
+    grid = np.random.default_rng(0).uniform(48, 208, (478, 2))
+    raw = np.concatenate([grid, np.zeros((478, 1))], 1)
+    est.det_calls, est.dets = 0, []
+
+    def detect_rois(rgb, max_faces=None):
+        est.det_calls += 1
+        return list(est.dets[:max_faces or est.num_faces])
+    est.detect_rois = detect_rois
+    est.landmark_input = lambda rgb, roi: roi
+    est.run_landmarks = lambda roi: (raw, 5.0)
+    est.run_blendshapes = lambda x: np.full(52, 0.25, np.float32)
+    return est
+
+
+def test_multi_face_detect_tracks_each_face_and_skips_detector():
+    rgb = np.zeros((480, 640, 3), np.uint8)
+    est = _stub_landmarker(num_faces=8)
+    centres = [(0.15, 0.3), (0.5, 0.3), (0.85, 0.3), (0.3, 0.75), (0.7, 0.75)]
+    est.dets = [(0.9, G.Rect(x, y, 0.15, 0.2, 0.0)) for x, y in centres]
+    faces = est.detect(rgb, 0)
+    assert len(faces) == 5 and est.det_calls == 1
+    for f, (x, y) in zip(faces, centres):
+        assert f.landmarks.shape == (478, 3) and f.blendshapes.shape == (52,)
+        assert np.isnan(f.blendshapes).all() and f.transform is None and not f.tracked
+        assert abs(f.landmarks[:, 0].mean() - x) < 0.03 and abs(f.landmarks[:, 1].mean() - y) < 0.03
+    assert len(est._prev_rois) == 5
+    # fewer tracked faces than num_faces: the detector runs; overlapping detections replace tracks
+    faces = est.detect(rgb, 33)
+    assert len(faces) == 5 and est.det_calls == 2 and not any(f.tracked for f in faces)
+    # num_faces reached: the detector is skipped and every face comes from its own tracked rect
+    est2 = _stub_landmarker(num_faces=2)
+    est2.dets = est.dets[:2]
+    est2.detect(rgb, 0)
+    faces = est2.detect(rgb, 33)
+    assert est2.det_calls == 1 and len(faces) == 2 and all(f.tracked for f in faces)
+    # a new face away from the tracked one is added alongside it
+    est3 = _stub_landmarker(num_faces=2)
+    est3.dets = est.dets[:1]
+    est3.detect(rgb, 0)
+    est3.dets = est.dets[1:3]
+    faces = est3.detect(rgb, 33)
+    assert est3.det_calls == 2 and [f.tracked for f in faces] == [True, False]
+
+
+def test_multi_face_clipped_and_image_mode_untracked():
+    rgb = np.zeros((480, 640, 3), np.uint8)
+    est = _stub_landmarker(num_faces=3, video=False, blendshapes=True)
+    est.dets = [(0.9, G.Rect(0.1 + 0.2 * i, 0.5, 0.1, 0.1, 0.0)) for i in range(5)]
+    for _ in range(2):
+        faces = est.detect(rgb)
+        assert len(faces) == 3 and not any(f.tracked for f in faces)
+        assert all(np.allclose(f.blendshapes, 0.25) for f in faces)
+    assert est.det_calls == 2 and est._prev_rois == []
+    assert est.process(rgb).landmarks.shape == (478, 3)
+
+
+def test_smoothing_with_several_faces_rejected():
+    pytest.importorskip("openvino")
+    from src.face_ov.landmarker import FaceLandmarkerOV
+    with pytest.raises(ValueError):
+        FaceLandmarkerOV("missing.task", num_faces=2, smooth=True)
+
+
+def test_face_backend_selection_and_cli_flags():
+    import argparse
+    from src.face_estimator import FACE_BACKENDS, FaceEstimator, add_face_backend_args
+    assert FACE_BACKENDS[0] == "mediapipe"
+    with pytest.raises(ValueError):
+        FaceEstimator(backend="onnx")
+    ap = argparse.ArgumentParser()
+    add_face_backend_args(ap)
+    a = ap.parse_args([])
+    assert (a.face_backend, a.face_device) == ("mediapipe", "CPU")
+    a = ap.parse_args(["--face-backend", "openvino", "--face-device", "gpu"])
+    assert (a.face_backend, a.face_device) == ("openvino", "GPU")
+    with pytest.raises(SystemExit):
+        ap.parse_args(["--face-device", "TPU"])
+    from src import segment_export
+    a = segment_export.parse_args(["--input", "x.mp4", "--out", "o", "--raw-root", "r", "--face-backend", "openvino",
+                                   "--face-device", "npu"])
+    assert segment_export.face_backend_kwargs(a) == dict(backend="openvino", device="NPU")
+    assert segment_export.face_backend_kwargs(segment_export.parse_args(
+        ["--input", "x.mp4", "--out", "o", "--raw-root", "r"])) == dict(backend="mediapipe", device="CPU")
+    assert segment_export.face_backend_kwargs(argparse.Namespace()) == dict(backend="mediapipe", device="CPU")
+
+
+def test_openvino_estimator_multi_face_blendshapes_off_and_matrix():
+    _need_model()
+    from src.face_estimator import FaceEstimator
+    from src.face_ov import FaceLandmarkerOV
+    ov = FaceLandmarkerOV(TASK, "CPU", video=False, num_faces=8, blendshapes=False, transform=True)
+    assert "bs" not in ov._models and ov.geometry is not None
+    assert ov.detect(np.full((240, 320, 3), 127, np.uint8)) == []
+    ov.close()
+    est = FaceEstimator(model_path=str(TASK), backend="openvino", num_faces=8, blendshapes=False)
+    assert est.all_faces(np.full((240, 320, 3), 127, np.uint8)) == []
+    est.close()
