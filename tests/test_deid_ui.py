@@ -76,7 +76,8 @@ def test_validate_request_gate_and_shareable():
 def test_missing_weights_message_points_to_official_sources(tmp_path, monkeypatch):
     monkeypatch.delenv(W.ENV_CONFIG, raising=False)
     g = O.missing_weights_message("ghost", O.weights_problems("ghost", None))
-    assert "no swap configuration" in g and O.GHOST_DOWNLOAD in g and "download_models.sh" in g
+    assert "no swap configuration" in g and "python scripts/fetch_models.py --ghost" in g
+    assert "download_models.sh" not in g
     assert "github.com/ai-forever/ghost" in g and "does not redistribute" in g and O.LICENCES_DOC in g
     assert "Fill" in g and "warp" not in g.lower() and "liveportrait" not in g.lower()
     assert O.FACE_MODEL_HINT in O.missing_weights_message("fill", O.face_model_problems(tmp_path))
@@ -208,7 +209,7 @@ def test_selector_widget_defaults_and_states():
         assert str(sel.share_cb.cget("state")) == "disabled" and not sel.share.get()
         assert "reduced risk, not de-identified" in sel.status.cget("text")
         assert any("research use only" in p for p in sel.problems())
-        assert "download_models.sh" in sel.weights.cget("text")                # no swap config: where to fetch
+        assert "fetch_models.py --ghost" in sel.weights.cget("text")           # no swap config: where to fetch
         sel.ack.set(True); sel.changed()
         assert not any("research use only" in p for p in sel.problems()) and sel.state()["research_ack"]
         sel.choice.set("original"); sel.changed()

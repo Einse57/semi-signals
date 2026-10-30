@@ -314,10 +314,25 @@ def face_backend_kwargs(a) -> dict:
     return dict(backend=getattr(a, "face_backend", "mediapipe"), device=getattr(a, "face_device", "CPU"))
 
 
+def landmarker_used(a, est) -> dict:
+    """Sidecar FaceLandmarker: the backend and the device the landmarker actually ran on (after any CPU
+    fallback), the device asked for, and the fallback note."""
+    req = face_backend_kwargs(a)
+    backend = getattr(est, "backend", req["backend"])
+    dev = getattr(est, "device", req["device"] if backend == "openvino" else "CPU")
+    d = dict(Backend=backend, Device=dev, DeviceRequested=req["device"] if backend == "openvino" else "CPU")
+    if getattr(a, "face_note", ""):
+        d["Note"] = a.face_note
+    return d
+
+
 def make_preprocessor(a):
-    from src.face_estimator import FaceEstimator
     from src.face_preprocess import FacePreprocessor
-    est = FaceEstimator(model_path=a.face_model, transform=True, **face_backend_kwargs(a))
+    from src.face_estimator import open_face_estimator
+    est, note = open_face_estimator(model_path=a.face_model, transform=True, **face_backend_kwargs(a))
+    a.face_note = note
+    if note:
+        print("[face] " + note, flush=True)
     pose = det = None
     if a.face_preprocess == "coco-head":
         from src.detector import PersonDetector
@@ -419,10 +434,12 @@ def main(argv=None):
         shift = int(known[0]) if known else S.random_shift_days(acq)
     run0 = max([int(r["run"]) for r in same_sub] or [0])
     est, pre, det, pose = make_preprocessor(a)
+    lmk = landmarker_used(a, est)
     multi = None
     if any(v in variants for v in MASK_STYLES + ("swap",)) and not a.no_bystanders:
         from src.face_estimator import FaceEstimator
-        multi = FaceEstimator(model_path=a.face_model, num_faces=8, blendshapes=False, **face_backend_kwargs(a))
+        multi = FaceEstimator(model_path=a.face_model, num_faces=8, blendshapes=False,
+                              **dict(face_backend_kwargs(a), device=lmk["Device"]))   # same device as the subject
     guard = make_fill_guard(a) if "fill" in variants else None
     if guard is not None and not guard.available:
         print("[fill check] " + guard.problem, flush=True)
@@ -487,7 +504,8 @@ def main(argv=None):
                 w_.release()
             found = int(np.isfinite(SC).sum())
             common = dict(Deidentified=True, AnnotationMode=",".join(sorted({e["mode"] for e in seg["events"]})) or "none",
-                          FacePreprocess=a.face_preprocess, PrivateMappingRef=mapping.name, Provisional=True)
+                          FacePreprocess=a.face_preprocess, FaceLandmarker=lmk, PrivateMappingRef=mapping.name,
+                          Provisional=True)
             bys = "" if multi is None else (" and every other face the landmarker found (whole frame + 4 tiles); "
                                             "faces it misses are not masked, check before sharing")
             miss = ("; frames without the subject's face masked whole" if a.missing_face == "frame"
@@ -546,7 +564,7 @@ def main(argv=None):
                        "depth (smaller = nearer the camera) on the x scale",
                 units="pixels", deidentified=True, mode=common["AnnotationMode"], preprocess=a.face_preprocess,
                 mapping_ref=mapping.name, blendshape_file=bs_path.name,
-                extra=dict(FramesWithFace=found, Frames=len(T),
+                extra=dict(FramesWithFace=found, Frames=len(T), FaceLandmarker=lmk,
                            RollRemovedDeg=None if a.face_preprocess != "detect" else
                            float(np.nanmedian(ROLL)) if np.isfinite(ROLL).any() else None)))
             if a.annotations:

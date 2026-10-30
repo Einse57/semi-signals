@@ -13,7 +13,12 @@ Labels (also written into the export sidecars as DeidentificationStatus):
 - ghost: "reduced risk, not de-identified"; research use only, needs the research-use acknowledgement
   (passed on as research_use_acknowledged, never saved between sessions).
 Third-party code and weights are not redistributed (docs/FACE_SWAP_LICENCES.md); when they are missing,
-missing_weights_message() says where to fetch them from (GHOST's own download_models.sh).
+missing_weights_message() says how to fetch them (GHOST_FETCH_HINT: scripts/fetch_models.py --ghost).
+
+Landmarker picker (next to the selector): MediaPipe (CPU, the default) or OpenVINO on a device OpenVINO
+finds (CPU, GPU, NPU, plus AUTO); passed to the export as --face-backend / --face-device, saved in the
+settings as face_backend / face_device, and written to the sidecars as FaceLandmarker (the device actually
+used: a device that does not load falls back to CPU, src/face_estimator.open_face_estimator).
 
 The other methods measured in phase 4 (mosaic8, mosaic16, Gaussian blur, warp, LivePortrait) stay in the
 experiment and measurement code (src/segment_export.mask_faces styles, the swap backends in
@@ -47,12 +52,71 @@ assert DEFAULT_SWAP == "ghost" and SWAP_METHODS == (DEFAULT_SWAP,) and DEFAULT_S
 
 FACE_MODEL_HINT = "python scripts/fetch_models.py --face --skip-data --skip-vsvig"
 LICENCES_DOC = "docs/FACE_SWAP_LICENCES.md"
-GHOST_DOWNLOAD = "https://github.com/ai-forever/ghost/blob/main/download_models.sh"
+GHOST_FETCH_HINT = "python scripts/fetch_models.py --ghost"
 OFFICIAL = {
-    "ghost": ("GHOST code: https://github.com/ai-forever/ghost (pinned commit in " + LICENCES_DOC + ", 'Phase 3' > "
-              "'Third-party code'); weights with GHOST's own download_models.sh (" + GHOST_DOWNLOAD + "): "
-              "G_unet_2blocks.pth and backbone.pth, sha256 pins in " + LICENCES_DOC + " 'Weights'"),
+    "ghost": ("run " + GHOST_FETCH_HINT + " (clones https://github.com/ai-forever/ghost at the pinned commit and "
+              "downloads its release files, sha256-checked, after you accept GHOST's licence terms; pins in "
+              + LICENCES_DOC + "); it writes third_party_local/ghost_models.json with the local paths"),
 }
+
+# ── landmarker picker ────────────────────────────────────────
+LANDMARKER_BACKENDS = {"mediapipe": "MediaPipe", "openvino": "OpenVINO"}
+DEFAULT_LANDMARKER = ("mediapipe", "CPU")
+OV_DEVICE_ORDER = ("CPU", "GPU", "NPU")
+
+
+def openvino_devices(available=None) -> list[str]:
+    """Devices the picker offers for OpenVINO: CPU / GPU / NPU that OpenVINO finds (GPU.0, GPU.1 -> GPU),
+    plus AUTO when at least one was found. `available` is openvino.Core().available_devices (read here
+    when None; [] when OpenVINO is not installed or cannot start)."""
+    if available is None:
+        try:
+            import openvino as ov
+            available = ov.Core().available_devices
+        except Exception:  # noqa: BLE001
+            available = []
+    found = {str(d).split(".")[0].upper() for d in available}
+    out = [d for d in OV_DEVICE_ORDER if d in found]
+    return out + ["AUTO"] if out else []
+
+
+def landmarker_devices(backend: str, ov_devices) -> list[str]:
+    """Device choices for a backend: MediaPipe runs on CPU only."""
+    return list(ov_devices) if backend == "openvino" else ["CPU"]
+
+
+def landmarker_choice(settings: dict | None, ov_devices) -> tuple[str, str]:
+    """(backend, device) from saved settings, checked against what this computer offers: an unknown
+    backend, OpenVINO without devices, or a device not found here -> the default / CPU."""
+    st = settings or {}
+    b = st.get("face_backend", DEFAULT_LANDMARKER[0])
+    d = str(st.get("face_device", DEFAULT_LANDMARKER[1])).upper()
+    if b not in LANDMARKER_BACKENDS or (b == "openvino" and not ov_devices):
+        return DEFAULT_LANDMARKER
+    devs = landmarker_devices(b, ov_devices)
+    return b, (d if d in devs else ("CPU" if "CPU" in devs else devs[0]))
+
+
+def probe_landmarker(backend: str, device: str, models_dir: Path | None = None, opener=None) -> tuple[str, str]:
+    """Load the landmarker once on (backend, device): returns (device actually used, note). A device that
+    does not load or compile falls back to CPU with a note; without the model file nothing is checked."""
+    if backend != "openvino" or device == "CPU":
+        return "CPU", ""
+    p = Path(models_dir or ROOT / "models") / "face_landmarker.task"
+    if opener is None:
+        if not p.exists():
+            return device, ""
+        from src.face_estimator import open_face_estimator as opener
+    try:
+        est, note = opener(model_path=str(p), backend=backend, device=device)
+    except Exception as e:  # noqa: BLE001  (CPU failed too)
+        return "CPU", f"OpenVINO did not load ({e}); export will try CPU"
+    used = getattr(est, "device", device)
+    try:
+        est.close()
+    except Exception:  # noqa: BLE001
+        pass
+    return used, note
 
 
 def check_choice(choice: str) -> str:
@@ -172,14 +236,15 @@ def default_dirs() -> tuple[Path, Path]:
 
 def export_cmd(video, method: str, *, python: str, annotations=None, out=None, raw_root=None, swap_config=None,
                research_ack: bool = False, shareable: bool = False, face_preprocess: str = "none",
-               mode: str = "face") -> list[str]:
+               mode: str = "face", face_backend: str = "mediapipe", face_device: str = "CPU") -> list[str]:
     """The segment_export command the UI starts for fill or ghost (validated again by segment_export)."""
     if method not in METHODS:
         raise ValueError(validate_request(method)[0])
     d_out, d_raw = default_dirs()
     cmd = [python, "-u", "-m", "src.segment_export", "--input", str(video), "--out", str(out or d_out),
            "--raw-root", str(raw_root or d_raw), "--deid-method", method, "--mode", mode,
-           "--face-preprocess", face_preprocess]
+           "--face-preprocess", face_preprocess, "--face-backend", face_backend,
+           "--face-device", face_device if face_backend == "openvino" else "CPU"]
     if annotations and Path(annotations).is_file():
         cmd += ["--annotations", str(annotations)]
     else:
@@ -226,7 +291,7 @@ def preview_image(frame, method: str, lm, others=(), swapper=None, width: int = 
 
 
 def preview_from_video(video, method: str, t: float | None = None, *, swap_config=None, research_ack=False,
-                       models_dir: Path | None = None):
+                       models_dir: Path | None = None, face_backend: str = "mediapipe", face_device: str = "CPU"):
     """Preview one frame of `video` (middle frame by default). Raises ValueError with the reason (not
     offered, missing models, research gate) instead of running something the export would refuse."""
     import cv2
@@ -258,8 +323,9 @@ def preview_from_video(video, method: str, t: float | None = None, *, swap_confi
         raise ValueError(f"cannot read a frame from {video}")
     lm = None
     if method != ORIGINAL:
-        from src.face_estimator import FaceEstimator
-        est = FaceEstimator(model_path=str(Path(models_dir or ROOT / "models") / "face_landmarker.task"))
+        from src.face_estimator import open_face_estimator
+        est, _ = open_face_estimator(model_path=str(Path(models_dir or ROOT / "models") / "face_landmarker.task"),
+                                     backend=face_backend, device=face_device)
         try:
             r = est.detect_image(frame)
         finally:

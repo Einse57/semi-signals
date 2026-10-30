@@ -275,6 +275,29 @@ class FaceEstimator:
         return self.estimate_crop(frame, box)
 
 
+def fallback_note(device: str, err: BaseException) -> str:
+    """UI / log note when an OpenVINO device did not load and the landmarker runs on CPU instead."""
+    lines = [s.strip() for s in str(err).splitlines() if s.strip()]
+    useful = [s for s in lines if not s.startswith(("Exception from", "Check '"))]   # skip OpenVINO source lines
+    msg = ((useful or lines or [type(err).__name__])[0])[:160]
+    return f"OpenVINO {device} did not load ({msg}); using CPU instead"
+
+
+def open_face_estimator(**kw):
+    """FaceEstimator(**kw), but an OpenVINO device that fails to load or compile falls back to CPU.
+    Returns (estimator, note): note is "" when the requested device loaded, else fallback_note().
+    A missing model file is not a device problem and is raised as is."""
+    try:
+        return FaceEstimator(**kw), ""
+    except FileNotFoundError:
+        raise
+    except Exception as e:  # noqa: BLE001  (OpenVINO raises RuntimeError and others on compile)
+        dev = str(kw.get("device", "CPU")).upper()
+        if kw.get("backend", "mediapipe") != "openvino" or dev == "CPU":
+            raise
+        return FaceEstimator(**dict(kw, device="CPU")), fallback_note(dev, e)
+
+
 def add_face_backend_args(ap) -> None:
     """--face-backend / --face-device for the scripts that take --face."""
     ap.add_argument("--face-backend", default="mediapipe", choices=FACE_BACKENDS,

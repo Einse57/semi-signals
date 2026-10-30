@@ -164,7 +164,10 @@ Face methods ([docs/FACE_DEID_TRADEOFF.md](docs/FACE_DEID_TRADEOFF.md)):
 - **Blur** (`--deid blur`): local review only. Mosaic16 is not de-identifying.
 
 The UI selector (launcher Face or Both mode, and "De-ID export..." in the annotation panel) offers Original,
-Fill and GHOST with a before/after preview. Third-party code, weights and donor images are not redistributed;
+Fill and GHOST with a before/after preview. Next to it, the Landmarker picker lets me run the face landmarks on
+MediaPipe (CPU, the default) or OpenVINO on any device OpenVINO finds (CPU, GPU, NPU, AUTO); if a device
+doesn't load, it drops back to CPU with a note, and the export sidecar records the device it actually used.
+Third-party code, weights and donor images are not redistributed;
 you fetch them yourself: [docs/FACE_SWAP_LICENCES.md](docs/FACE_SWAP_LICENCES.md).
 `python scripts/fetch_models.py --ghost --accept-ghost-licences --skip-data --skip-vsvig` fetches the GHOST
 code (Apache-2.0) and four files from the GHOST GitHub releases, sha256-checked, into the git-ignored

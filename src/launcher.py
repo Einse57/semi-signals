@@ -160,7 +160,13 @@ def deid_export_cmd(s: dict, d: dict, out=None, raw_root=None) -> list[str]:
     return O.export_cmd(v, d["deid_method"], python=sys.executable, annotations=eaf if eaf.is_file() else None,
                         out=out, raw_root=raw_root, swap_config=d.get("swap_config") or None,
                         research_ack=d.get("research_ack", False), shareable=d.get("shareable", False),
-                        mode=s.get("annot_mode", "face") if s.get("annot_mode") in ("face", "both") else "face")
+                        mode=s.get("annot_mode", "face") if s.get("annot_mode") in ("face", "both") else "face",
+                        face_backend=d.get("face_backend", "mediapipe"), face_device=d.get("face_device", "CPU"))
+
+
+def _landmarker_keys(d: dict) -> dict:
+    from src.deid_ui import landmarker_settings
+    return landmarker_settings(d)
 
 
 def has_torch() -> bool:
@@ -304,7 +310,7 @@ class Launcher:
         from src.deid_ui import DeidSelector
         self.deid = DeidSelector(opt, st, models_dir)
         self.deid.frame.grid(row=5, column=0, columnspan=6, sticky="ew", pady=(8, 0))
-        db = ttk.Frame(self.deid.frame); db.grid(row=7, column=0, columnspan=4, sticky="w", pady=(6, 0))
+        db = ttk.Frame(self.deid.frame); db.grid(row=8, column=0, columnspan=4, sticky="w", pady=(6, 0))
         self.deid_btns = [ttk.Button(db, text="Preview (before/after)", command=self.deid_preview),
                           ttk.Button(db, text="Export de-identified segments", command=self.deid_export)]
         for i, w_ in enumerate(self.deid_btns):
@@ -366,6 +372,7 @@ class Launcher:
                     annotator=self.annotator.get(), pat_id=self.pat_id.get(), proxy=self.proxy.get(),
                     annot_mode=self.annot_mode.get() or "body",
                     deid_method=self.deid.method(), swap_config=self.deid.swap_config.get().strip(),
+                    **_landmarker_keys(self.deid.state()),
                     consent=next((k for k, v in CONSENT.items() if v == self.consent.get()), ""))
 
     def refresh(self):

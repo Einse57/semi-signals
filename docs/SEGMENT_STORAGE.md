@@ -119,8 +119,9 @@ The launcher (Annotation mode Face or Both) and the annotation panel ("De-ID exp
   sharing. The log shows the unmasked-face check result, and a NOT SHAREABLE line with the frame list when
   it fails. Without the YuNet model the selector says so and sharing is blocked.
 - **De-identify: GHOST**: "reduced risk, not de-identified"; research use only, behind a research-use
-  acknowledgement (not saved). Missing weights are listed with GHOST's `download_models.sh`
-  (https://github.com/ai-forever/ghost/blob/main/download_models.sh).
+  acknowledgement (not saved). Missing weights point to `python scripts/fetch_models.py --ghost`.
+- **Landmarker**: MediaPipe (CPU, default) or OpenVINO on a device OpenVINO finds (CPU, GPU, NPU, AUTO).
+  A device that doesn't load falls back to CPU with a note; sidecars record it as `FaceLandmarker`.
 - **Preview (before/after)**: the middle frame, nothing saved.
 
 Export runs `python -m src.segment_export ... --deid-method fill|ghost` into `~/semi-signals-local/export`
