@@ -10,6 +10,9 @@ On Windows, from the repo folder:
 1. Double-click `start.cmd` (or run `.\start.ps1` in PowerShell). The first time, if there is no `.venv`, it
    offers to create one and install the requirements (the same steps as [Windows setup](#windows-setup-igpu-via-openvino),
    including the OpenCV fix). Behind a proxy, set `HTTPS_PROXY` first, or answer `n` to see the manual steps.
+   It looks for Python in this order: `SEMI_PYTHON`, pyenv-win, the `py` launcher, `python` on PATH. To pick
+   one yourself: `$env:SEMI_PYTHON = "C:\path\to\python.exe"` in PowerShell (or `set SEMI_PYTHON=...` in cmd)
+   before running it.
 2. In the launcher window, click **Fetch models & sample data** once (output in the log pane; the optional
    **Proxy** field sets `HTTPS_PROXY` for the download). VSViG is skipped when torch is not installed.
 3. Pick a sample clip from the **Video** list (`data\pat*\*.mp4`) or **Browse...** to any video.

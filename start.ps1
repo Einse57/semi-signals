@@ -20,11 +20,24 @@ function Show-SetupHelp {
 }
 
 function Find-BasePython {
-    # 1) SEMI_PYTHON, 2) pyenv-win, 3) the py launcher, 4) python on PATH (not the Microsoft Store stub)
+    # 1) SEMI_PYTHON, 2) pyenv-win (active version, else the newest installed 3.10-3.12), 3) the py launcher,
+    # 4) python on PATH (not the Microsoft Store stub)
     if ($env:SEMI_PYTHON -and (Test-Path -LiteralPath $env:SEMI_PYTHON)) { return $env:SEMI_PYTHON }
     if (Get-Command pyenv -ErrorAction SilentlyContinue) {
         $p = (& pyenv which python 2>$null | Select-Object -First 1)
-        if ($p -and (Test-Path -LiteralPath $p.Trim())) { return $p.Trim() }
+        if ($LASTEXITCODE -eq 0 -and $p -and (Test-Path -LiteralPath $p.Trim())) { return $p.Trim() }
+    }
+    # pyenv-win installs without a usable global/local version: newest installed 3.10-3.12
+    $roots = @($env:PYENV, $env:PYENV_ROOT, (Join-Path $env:USERPROFILE '.pyenv\pyenv-win')) | Where-Object { $_ }
+    foreach ($r in $roots) {
+        $vd = Join-Path $r 'versions'
+        if (-not (Test-Path -LiteralPath $vd)) { continue }
+        $v = Get-ChildItem -LiteralPath $vd -Directory | Where-Object { $_.Name -match '^3\.(1[0-2])\.\d+$' } |
+            Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
+        if ($v) {
+            $exe = Join-Path $v.FullName 'python.exe'
+            if (Test-Path -LiteralPath $exe) { return $exe }
+        }
     }
     if (Get-Command py -ErrorAction SilentlyContinue) {
         $p = (& py -3 -c 'import sys; print(sys.executable)' 2>$null | Select-Object -First 1)
@@ -33,7 +46,7 @@ function Find-BasePython {
     $cmd = Get-Command python -ErrorAction SilentlyContinue
     if ($cmd -and $cmd.Source -notlike '*WindowsApps*') {
         $p = (& $cmd.Source -c 'import sys; print(sys.executable)' 2>$null | Select-Object -First 1)
-        if ($p -and (Test-Path -LiteralPath $p.Trim())) { return $p.Trim() }
+        if ($LASTEXITCODE -eq 0 -and $p -and (Test-Path -LiteralPath $p.Trim())) { return $p.Trim() }
     }
     return $null
 }
@@ -54,6 +67,7 @@ if (-not (Test-Path -LiteralPath $Py)) {
     $base = Find-BasePython
     if (-not $base) {
         Write-Host 'Could not find Python 3 (pyenv-win, py launcher or python on PATH).' -ForegroundColor Red
+        Write-Host 'Point SEMI_PYTHON at a python.exe, e.g.  $env:SEMI_PYTHON = "C:\Python312\python.exe"' -ForegroundColor Yellow
         Show-SetupHelp
         Exit-WithPause 1
     }
