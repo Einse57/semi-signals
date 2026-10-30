@@ -152,6 +152,17 @@ def annotate_cmd(s: dict, data_dir: Path, models_dir: Path, extra: list[str] = (
     return cmd + list(extra)
 
 
+def deid_export_cmd(s: dict, d: dict, out=None, raw_root=None) -> list[str]:
+    """segment_export for the face de-identification choice d (src/deid_ui.DeidSelector.state())."""
+    from src import deid_options as O
+    v = Path(s["video"])
+    eaf = v.with_suffix(".eaf")
+    return O.export_cmd(v, d["deid_method"], python=sys.executable, annotations=eaf if eaf.is_file() else None,
+                        out=out, raw_root=raw_root, swap_config=d.get("swap_config") or None,
+                        research_ack=d.get("research_ack", False), shareable=d.get("shareable", False),
+                        mode=s.get("annot_mode", "face") if s.get("annot_mode") in ("face", "both") else "face")
+
+
 def has_torch() -> bool:
     import importlib.util
     return importlib.util.find_spec("torch") is not None
@@ -288,7 +299,19 @@ class Launcher:
         ttk.Label(opt, text="Annotation mode").grid(row=4, column=0, sticky="w", pady=(6, 0))
         self.annot_mode = tk.StringVar(value=st.get("annot_mode", "body") if st.get("annot_mode") in ANNOT_MODES else "body")
         for i, (k, lab) in enumerate(ANNOT_MODES.items()):
-            ttk.Radiobutton(opt, text=lab, value=k, variable=self.annot_mode).grid(row=4, column=1 + i, sticky="w", padx=6, pady=(6, 0))
+            ttk.Radiobutton(opt, text=lab, value=k, variable=self.annot_mode, command=self._mode_changed).grid(
+                row=4, column=1 + i, sticky="w", padx=6, pady=(6, 0))
+        from src.deid_ui import DeidSelector
+        self.deid = DeidSelector(opt, st, models_dir)
+        self.deid.frame.grid(row=5, column=0, columnspan=6, sticky="ew", pady=(8, 0))
+        db = ttk.Frame(self.deid.frame); db.grid(row=7, column=0, columnspan=4, sticky="w", pady=(6, 0))
+        self.deid_btns = [ttk.Button(db, text="Preview (before/after)", command=self.deid_preview),
+                          ttk.Button(db, text="Export de-identified segments", command=self.deid_export)]
+        for i, w_ in enumerate(self.deid_btns):
+            w_.grid(row=0, column=i, padx=(0, 6))
+        self.deid_note = ttk.Label(db, text="", foreground="#666")
+        self.deid_note.grid(row=0, column=2, sticky="w")
+        self._mode_changed()
         ttk.Label(opt, text="labels: labels/body.json, labels/face.json", foreground="#666").grid(
             row=4, column=4, columnspan=2, sticky="w", pady=(6, 0))
         ttk.Label(opt, text="Proxy (optional)").grid(row=3, column=0, sticky="w", pady=(6, 0))
@@ -342,6 +365,7 @@ class Launcher:
                     vsvig=self.vsvig.get() and (self.models_dir / "vsvig_base.xml").exists(),
                     annotator=self.annotator.get(), pat_id=self.pat_id.get(), proxy=self.proxy.get(),
                     annot_mode=self.annot_mode.get() or "body",
+                    deid_method=self.deid.method(), swap_config=self.deid.swap_config.get().strip(),
                     consent=next((k for k, v in CONSENT.items() if v == self.consent.get()), ""))
 
     def refresh(self):
@@ -435,6 +459,31 @@ class Launcher:
                 self.consent.set(CONSENT[s["consent"]])
             self.run("annotation", annotate_cmd(s, self.data_dir, self.models_dir), s)
 
+    def _mode_changed(self):
+        on = self.annot_mode.get() in ("face", "both")
+        self.deid.set_enabled(on)
+        for w_ in self.deid_btns:
+            w_.configure(state="normal" if on else "disabled")
+        self.deid_note.configure(text="" if on else "choose Annotation mode Face or Both to use these")
+
+    def deid_preview(self):
+        s = self._need_video()
+        if s:
+            from src.deid_ui import show_preview
+            err = show_preview(self.root, s["video"], self.deid)
+            if err:
+                self.write(err + "\n", "err")
+
+    def deid_export(self):
+        s = self._need_video()
+        if not s:
+            return
+        p = self.deid.problems()
+        if p:
+            self.write("\n".join(p) + "\n", "err"); return
+        d = self.deid.state()
+        self.run("export", deid_export_cmd(s, d), s)
+
     def fetch(self):
         if not has_torch():
             self.write("Note: VSViG (optional reference model) is skipped because torch is not installed.\n")
@@ -466,7 +515,7 @@ class Launcher:
         self.proc_name = name
         self.prog.configure(value=0)
         self.prog_text.set({"viewer": "Viewer running", "annotation": "Step 1 of 2: processing (pose + scores)...",
-                            "fetch": "Downloading..."}.get(name, ""))
+                            "fetch": "Downloading...", "export": "Exporting de-identified segments..."}.get(name, ""))
         self.btns["stop"].configure(state="normal")
         threading.Thread(target=self._reader, args=(self.proc, name), daemon=True).start()
 

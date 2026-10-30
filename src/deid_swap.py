@@ -126,8 +126,11 @@ def check_config(cfg: dict) -> list[str]:
     return problems
 
 
-def make_swapper(config_path=None) -> FaceSwapper:
+def make_swapper(config_path=None, overrides: dict | None = None) -> FaceSwapper:
+    """overrides: values set by the UI choice (src/deid_options.swap_overrides: backend and, for research
+    backends, research_use_acknowledged from the UI acknowledgement)."""
     cfg = load_config(config_path)
+    cfg = dict(cfg, **(overrides or {}))
     cfg = dict(cfg, backend=backend_of(cfg))
     problems = check_config(cfg)
     if problems:

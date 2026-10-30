@@ -218,6 +218,7 @@ def panel_buttons(mode="body", face_terms=False):
         b[0:1] = [("Body onset", "o"), ("Face onset", "f")]
     if mode in ("face", "both"):
         b.insert(b.index(("Note...", "n")) + 1, ("Side...", "d"))
+        b.insert(b.index(("Open in ELAN", "elan")) + 1, ("De-ID export...", "deid"))
     return b
 
 
@@ -295,6 +296,25 @@ class ControlPanel:
             except self.tk.TclError:
                 pass
         self.ok, _parent = False, None
+
+
+def deid_export(video, eaf, mode, status, face_preprocess="none"):
+    """Panel button (face/both mode): choose a de-identification method (src/deid_ui.py) and start
+    src.segment_export in the background; it checks the choice again before writing anything."""
+    r = _root()
+    if r is None:
+        return status + "  |  de-ID export needs a window"
+    from src.deid_ui import ask_export
+    cmd = ask_export(_parent or r, video, eaf, models_dir=Path(__file__).resolve().parents[1] / "models",
+                     mode="face" if mode == "face" else "both", face_preprocess=face_preprocess)
+    if not cmd:
+        return status
+    log = Path(video).with_name(Path(video).stem + "_deid_export.log")
+    with open(log, "w", encoding="utf-8") as f:
+        subprocess.Popen(cmd, cwd=str(Path(__file__).resolve().parents[1]), stdout=f, stderr=subprocess.STDOUT,
+                         stdin=subprocess.DEVNULL)
+    method = cmd[cmd.index("--deid-method") + 1]
+    return status + f"  |  de-ID export ({method}) started, log {log.name}"
 
 
 # ── processing ───────────────────────────────────────────────
@@ -727,6 +747,9 @@ def main(argv=None):
         elif c == "elan":
             status = save()
             open_in_elan(eaf)
+        elif c == "deid":
+            status = save()
+            status = deid_export(video, eaf, a.mode, status, getattr(a, "face_preprocess", "none"))
         elif handle(c, t):
             status = save()
         panel.set_status(f"{status}  |  {len(ann['events'])} event(s)" + ("  |  exclude open" if open_excl is not None else ""))
