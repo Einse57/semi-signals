@@ -1,4 +1,4 @@
-# Face swap: licence audit (phases 1 to 3)
+# Face swap: licence audit (phases 1 to 4)
 
 Audit of GHOST (<https://github.com/ai-forever/ghost>, commit `44e58aa`, 2025-02-25) and everything it
 needs, done before any weights were downloaded or run. Read from the source repository, its release
@@ -387,6 +387,106 @@ Observations:
 - SFace and ArcFace give different shares for the same outputs (for example warp with subject geometry on
   GRID: SFace 100 % at or above 0.363, ArcFace 82 % at or above 0.30 and 0 % at or above 0.45).
 - All `warp`, `ghost` and `liveportrait` outputs are **reduced risk, not de-identified**.
+
+## Phase 4: synthetic photo donors (2026-10-29)
+
+Phase 3 used a procedural mesh render as the donor. GHOST takes its identity code from the donor, and LivePortrait
+animates the donor image, so both need a photographic donor face. FLUX.1 [schnell] stays on hold (gated
+repository). Decision (project owner, 2026-10-29): donors come from an existing synthetic face dataset only; no
+photographs of real people.
+
+### Donor dataset
+
+| Dataset | Version / source | Licence | Subjects and consent | Realism | Status |
+|---|---|---|---|---|---|
+| SFHQ, Synthetic Faces High Quality (D. Beniaguev) | parts 3 and 4 on Kaggle (DOI 10.34740/kaggle/dsv/4737549), code at github.com/SelfishGene/SFHQ-dataset (MIT); not redistributed: users download it from Kaggle and accept its terms themselves | images CC0 1.0 (Kaggle) | no real subjects: every image is generated (StyleGAN2 with e4e encoding; part 3 from StyleGAN2 samples, part 4 from Stable Diffusion 2.1 portraits), so there is no consent to record. Flag: StyleGAN2 was trained on FFHQ (Flickr photos, no subject consent; StyleGAN2 weights under the NVIDIA Source Code License, non-commercial), so a generated face can resemble a real person by chance | photographic 1024 px faces; some stylised hair colours and painted looks (removed by hand) | **used**, 32 donors, local only, never committed; no SFHQ images or SFHQ-donor swaps in this repository or public posts (aggregate numbers only) |
+| DigiFace-1M (Microsoft) | github.com/microsoft/DigiFace1M | Research Use of Data Agreement v1.0 (non-commercial research) | no real subjects (rendered) | 112 x 112 px rendered faces, not photographic | not used |
+
+FLUX.1 [schnell] (black-forest-labs, Apache-2.0): on hold; the gated repository was not downloaded.
+
+Donor selection (`e2e/phase4/select_donors.py`, outside this repository): 1450 SFHQ images resized to 512 px;
+YuNet finds exactly one face (score >= 0.85); frontal (yaw proxy <= 0.08, roll <= 6 degrees); neutral
+(MediaPipe blendshapes mouthSmile <= 0.3, jawOpen <= 0.15, eyeBlink <= 0.5); even light (face luma 80-200,
+left/right ratio >= 0.8); SFace < 0.363 and ArcFace < 0.30 against every face found in every 5th frame of the 6
+clips. 153 passed; a manual pass removed children, glasses, sunglasses, a grayscale image and stylised faces;
+32 donors kept. The donor images, landmarks, hashes and provenance stay in the local, git-ignored
+`data/donors_synthetic/` (PROVENANCE.md there). Donor for the table: SFHQ part 3 image 00001482.
+
+**Every `warp`, `ghost` and `liveportrait` output, with either donor, is "reduced risk, not de-identified".**
+`ghost` and `liveportrait` stay research use only and local. `fill` stays the default and the only mode
+treated as shareable. `ghost` is the default swap backend (owner decision, 2026-10-29). Public figures use the
+mesh donor, `fill` or mosaic; no SFHQ images or SFHQ-donor swaps are published.
+
+Measured baselines (no donor, one row each; `src/segment_export.py`, `mask_faces` styles `mosaic8`,
+`mosaic16`, `gauss`): the same region as `fill` (each face's landmark hull grown by 25 %, subject and bystanders;
+the whole frame when there is no subject face). W = the face box width (horizontal extent of that face's
+landmarks; frame width for whole-frame frames).
+
+- `mosaic8`: square blocks of round(W / 8) px, about 8 blocks across the face box (W = 108 px on GRID lwwy7p
+  frame 20 gives 13 px blocks). **Reduced risk, not de-identified.**
+- `mosaic16`: square blocks of round(W / 16) px, about 16 blocks across (7 px blocks at W = 108 px). **Not de-identifying.**
+  (rule and per-clip results in [FACE_DEID_TRADEOFF.md](FACE_DEID_TRADEOFF.md)).
+- `gauss`: Gaussian blur, sigma = W / 6 px, square kernel 2 * ceil(3 * sigma) + 1 px (sigma 18 px, kernel 109 px
+  at W = 108 px). **Local review only.**
+
+Blocks start at the top-left corner of the grown hull's bounding box (area-averaged, nearest-neighbour upscale); only
+pixels inside the hull change.
+
+### Measurements: baselines, mesh donor and SFHQ donor
+
+| Method | Donor | Clips (frames) | MediaPipe hit | YuNet hit | SFace mean (n; share >= 0.363) | ArcFace mean (n; share >= 0.30; share >= 0.45) | Landmark r | Blendshape r | ms/frame (box CPU) |
+|---|---|---|---|---|---|---|---|---|---|
+| fill (shareable default) | - | GRID 4/4 (300) | 0 % | 0 % | no face (n 0) | no face (n 0) | (0 frames) | (0 frames) | 1.1 |
+| mosaic, 8 blocks across face | - | GRID 4/4 (300) | 11 % | 50 % | 0.19 (151; 0 %) | 0.10 (151; 0 %; 0 %) | (38 frames) | (38 frames) | 1.1 |
+| mosaic, 16 blocks across face | - | GRID 4/4 (300) | 100 % | 100 % | 0.57 (300; 99 %) | 0.58 (300; 100 %; 100 %) | 0.25 | 0.32 | 1.1 |
+| Gaussian blur, sigma face width / 6 (local review only) | - | GRID 4/4 (300) | 1.3 % | 0 % | no face (n 0) | no face (n 0) | (4 frames) | (4 frames) | 8.1 |
+| warp, donor geometry | mesh render (seed 2) | GRID 4/4 (300) | 100 % | 100 % | 0.31 (300; 8.7 %) | 0.18 (300; 0 %; 0 %) | 0.78 | 0.68 | 11.2 |
+| warp, donor geometry | SFHQ synthetic photo | GRID 4/4 (300) | 100 % | 100 % | 0.48 (300; 100 %) | 0.29 (300; 41 %; 0 %) | 0.69 | 0.54 | 11.5 |
+| ghost | mesh render (seed 2) | GRID 4/4 (300) | 100 % | 100 % | 0.36 (300; 43 %) | 0.13 (300; 0 %; 0 %) | 0.78 | 0.68 | 384.2 |
+| ghost | SFHQ synthetic photo | GRID 4/4 (300) | 100 % | 100 % | 0.38 (300; 64 %) | 0.22 (300; 4.0 %; 0 %) | 0.82 | 0.74 | 372.8 |
+| liveportrait | mesh render (seed 2) | GRID 4/4 (300) | 100 % | 100 % | 0.27 (300; 1.7 %) | 0.13 (300; 0 %; 0 %) | 0.14 | 0.02 | 1950.6 |
+| liveportrait | SFHQ synthetic photo | GRID 4/4 (300) | 100 % | 100 % | 0.35 (300; 39 %) | 0.17 (300; 0 %; 0 %) | 0.60 | 0.39 | 1886.7 |
+| fill (shareable default) | - | Intel 2/2 (2810) | 0.2 % | 0.7 % | 0.75 (19; 79 %) | 0.73 (19; 79 %; 79 %) | (19 frames) | (19 frames) | 1.1 |
+| mosaic, 8 blocks across face | - | Intel 2/2 (2810) | 13 % | 51 % | 0.19 (1764; 5.4 %) | 0.07 (1764; 2.0 %; 0.9 %) | 0.16 | 0.01 | 1.1 |
+| mosaic, 16 blocks across face | - | Intel 2/2 (2810) | 68 % | 73 % | 0.54 (3849; 89 %) | 0.55 (3849; 92 %; 86 %) | 0.25 | 0.09 | 1.1 |
+| Gaussian blur, sigma face width / 6 (local review only) | - | Intel 2/2 (2810) | 0.5 % | 4.2 % | 0.27 (124; 12 %) | 0.14 (124; 11 %; 11 %) | (16 frames) | (16 frames) | 8.1 |
+| warp, donor geometry | mesh render (seed 2) | Intel 2/2 (2810) | 73 % | 73 % | 0.22 (3866; 5.7 %) | 0.11 (3866; 0.8 %; 0.4 %) | 0.50 | 0.29 | 11.2 |
+| warp, donor geometry | SFHQ synthetic photo | Intel 2/2 (2810) | 73 % | 73 % | 0.27 (3917; 26 %) | 0.12 (3917; 1.0 %; 0.4 %) | 0.47 | 0.27 | 11.5 |
+| ghost | mesh render (seed 2) | Intel 2/2 (2810) | 73 % | 73 % | 0.31 (3920; 31 %) | 0.13 (3920; 1.0 %; 0.4 %) | 0.55 | 0.41 | 384.2 |
+| ghost | SFHQ synthetic photo | Intel 2/2 (2810) | 73 % | 73 % | 0.26 (3928; 17 %) | 0.10 (3928; 1.2 %; 0.5 %) | 0.53 | 0.44 | 372.8 |
+| liveportrait | mesh render (seed 2) | Intel 2/2 (2810) | 71 % | 70 % | 0.22 (3624; 2.2 %) | 0.10 (3624; 0.5 %; 0.4 %) | 0.18 | -0.01 | 1950.6 |
+| liveportrait | SFHQ synthetic photo | Intel 2/2 (2810) | 68 % | 72 % | 0.10 (3800; 2.3 %) | 0.04 (3800; 0.4 %; 0.4 %) | 0.32 | 0.20 | 1886.7 |
+
+Clips: GRID s14 bbad9n, bbae1p, bbae2a, lwwy7p (300 frames) and the Intel sample clips
+face-demographics-walking-and-pause and head-pose-face-detection-female-and-male (2810 frames). Columns as in the
+phase 3 table. ms/frame = the method only, on the working machine (shared VM, 8 vCPU "Intel(R) Xeon(R)
+Processor", 15.6 GB RAM, no GPU, torch 2.15.0+cpu). ms/frame are render-only on GRID lwwy7p (75 frames) with the box otherwise idle (8 vCPU Xeon, 8 threads), landmarks excluded. No donor, ms/frame: fill 1.1, mosaic8 1.1, mosaic16 1.1, gauss 8.1. Swaps, ms/frame: SFHQ donor warp 11, ghost 373, liveportrait 1887; mesh donor warp 11, ghost 384, liveportrait 1951. Part of the phase 4 GHOST and LivePortrait rendering and the donor sweep ran on a separate workstation to finish sooner; those timings are not reported here.
+
+Donor spread (warp and ghost on GRID lwwy7p, 75 frames, each of the 32 SFHQ donors):
+
+| Method | Donors | YuNet hit (min-max) | SFace share >= 0.363: median (min-max) over donors | ArcFace share >= 0.30: median (min-max) | ArcFace share >= 0.45: median (min-max) |
+|---|---|---|---|---|---|
+| warp, donor geometry | 32 SFHQ | 100 %-100 % | 55 % (0 %-100 %) | 0 % (0 %-100 %) | 0 % (0 %-15 %) |
+| ghost | 32 SFHQ | 100 %-100 % | 31 % (0 %-100 %) | 0 % (0 %-12 %) | 0 % (0 %-0 %) |
+
+Observations:
+
+- GRID, `warp`: SFace share >= 0.363 8.7 % (mesh) vs 100.0 % (SFHQ); ArcFace share >= 0.30 0.0 % vs 41.0 %, >= 0.45 0.0 % vs 0.0 %; YuNet hit 100.0 % vs 100.0 %; landmark r 0.78 vs 0.69; blendshape r 0.68 vs 0.54.
+- GRID, `ghost`: SFace share >= 0.363 42.7 % (mesh) vs 64.3 % (SFHQ); ArcFace share >= 0.30 0.0 % vs 4.0 %, >= 0.45 0.0 % vs 0.0 %; YuNet hit 100.0 % vs 100.0 %; landmark r 0.78 vs 0.82; blendshape r 0.68 vs 0.74.
+- GRID, `liveportrait`: SFace share >= 0.363 1.7 % (mesh) vs 38.7 % (SFHQ); ArcFace share >= 0.30 0.0 % vs 0.0 %, >= 0.45 0.0 % vs 0.0 %; YuNet hit 100.0 % vs 100.0 %; landmark r 0.14 vs 0.60; blendshape r 0.02 vs 0.39.
+- Intel, `warp`: SFace share >= 0.363 5.7 % (mesh) vs 25.7 % (SFHQ); ArcFace share >= 0.30 0.8 % vs 1.0 %, >= 0.45 0.4 % vs 0.4 %; YuNet hit 73.0 % vs 73.0 %; landmark r 0.50 vs 0.47; blendshape r 0.29 vs 0.27.
+- Intel, `ghost`: SFace share >= 0.363 31.1 % (mesh) vs 16.6 % (SFHQ); ArcFace share >= 0.30 1.0 % vs 1.2 %, >= 0.45 0.4 % vs 0.5 %; YuNet hit 73.0 % vs 73.0 %; landmark r 0.55 vs 0.53; blendshape r 0.41 vs 0.44.
+- Intel, `liveportrait`: SFace share >= 0.363 2.2 % (mesh) vs 2.3 % (SFHQ); ArcFace share >= 0.30 0.5 % vs 0.4 %, >= 0.45 0.4 % vs 0.4 %; YuNet hit 70.4 % vs 72.2 %; landmark r 0.18 vs 0.32; blendshape r -0.01 vs 0.20.
+- GRID, `mosaic8` (mosaic, 8 blocks, no donor): MediaPipe hit 10.7 %, YuNet hit 50.3 %; SFace share >= 0.363 0.0 % (n 151); ArcFace share >= 0.30 0.0 %, >= 0.45 0.0 %; landmark r -0.07; blendshape r 0.01.
+- GRID, `mosaic16` (mosaic, 16 blocks, no donor): MediaPipe hit 100.0 %, YuNet hit 100.0 %; SFace share >= 0.363 99.0 % (n 300); ArcFace share >= 0.30 100.0 %, >= 0.45 99.7 %; landmark r 0.25; blendshape r 0.32.
+- GRID, `gauss` (Gaussian blur, no donor): MediaPipe hit 1.3 %, YuNet hit 0.0 %; SFace share >= 0.363 - (n 0); ArcFace share >= 0.30 -, >= 0.45 -; landmark r -; blendshape r 0.07.
+- Intel, `mosaic8` (mosaic, 8 blocks, no donor): MediaPipe hit 12.7 %, YuNet hit 50.6 %; SFace share >= 0.363 5.4 % (n 1764); ArcFace share >= 0.30 2.0 %, >= 0.45 0.9 %; landmark r 0.16; blendshape r 0.01.
+- Intel, `mosaic16` (mosaic, 16 blocks, no donor): MediaPipe hit 68.3 %, YuNet hit 72.8 %; SFace share >= 0.363 88.8 % (n 3849); ArcFace share >= 0.30 92.1 %, >= 0.45 86.2 %; landmark r 0.25; blendshape r 0.09.
+- Intel, `gauss` (Gaussian blur, no donor): MediaPipe hit 0.5 %, YuNet hit 4.2 %; SFace share >= 0.363 12.1 % (n 124); ArcFace share >= 0.30 11.3 %, >= 0.45 11.3 %; landmark r 0.99; blendshape r -0.05.
+- `mosaic8` is **reduced risk, not de-identified**; `mosaic16` is **not de-identifying**; `gauss` is **local review only**.
+- All `warp`, `ghost` and `liveportrait` outputs, with either donor, are **reduced risk, not de-identified**; `fill` stays the only shareable default.
+
+Motion preservation vs identity for every method and donor: [FACE_DEID_TRADEOFF.md](FACE_DEID_TRADEOFF.md).
 
 ## What is in this repository
 
