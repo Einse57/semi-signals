@@ -24,6 +24,27 @@ def test_swap_config_problems_listed(tmp_path):
     assert W.check_config(dict(backend="other")) and "unknown" in W.check_config(dict(backend="other"))[0]
 
 
+def test_ghost_is_default_swap_backend(tmp_path, monkeypatch):
+    assert W.DEFAULT_BACKEND == "ghost" and W.backend_of({}) == "ghost" and W.backend_of(dict(backend="warp")) == "warp"
+    probs = W.check_config(dict(licence_reviewed=True))          # no "backend": checked as ghost
+    assert not any("unknown" in p for p in probs)
+    assert any("research_use_acknowledged" in p for p in probs) and any("models.generator" in p for p in probs)
+    files = {k: tmp_path / f"{k}.bin" for k in W.REQUIRED["ghost"]}
+    for f in files.values():
+        f.write_bytes(b"x")
+    donor = tmp_path / "donor.png"
+    donor.write_bytes(b"x")
+    cfg = dict(licence_reviewed=True, research_use_acknowledged=True, models={k: str(v) for k, v in files.items()},
+               donor=str(donor), donor_licence="synthetic, test")
+    p = tmp_path / "swap.json"
+    p.write_text(json.dumps(cfg))
+    seen = {}
+    monkeypatch.setitem(W._REGISTRY, "ghost", lambda c: seen.setdefault("cfg", c))
+    W.make_swapper(str(p))
+    assert seen["cfg"]["backend"] == "ghost"
+    assert "ghost" in W.RESEARCH_ONLY and W.DEID_STATUS == "reduced risk, not de-identified"
+
+
 @pytest.mark.parametrize("backend", W.RESEARCH_ONLY)
 def test_research_backends_need_acknowledgement(tmp_path, backend):
     files = {k: tmp_path / f"{k}.bin" for k in W.REQUIRED[backend]}

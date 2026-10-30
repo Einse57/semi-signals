@@ -61,5 +61,5 @@ A clip counts as an identity match when it has at least 20 detected face pairs a
 - `mosaic16` (about 16 blocks across the face): 5 of 5 scored clips with a detected face are identity matches (GRID lwwy7p: SFace 100 %). Label: **not de-identifying (provisional: 5 of 6 clips scored)**.
 - `mosaic8` (about 8 blocks across the face) and `gauss` (sigma = face width / 6) are measured baselines. Where they show a face with a high identity share on Intel, those are faces the landmarker missed, which every method leaves unchanged (as with `fill`).
 - `fill` removes the face: no face is found and no motion can be measured. It stays the shareable fallback and the default.
-- `warp`, `ghost` and `liveportrait` keep a face and are **reduced risk, not de-identified**; `ghost` and `liveportrait` are research use only and their outputs stay local. The default swap option is unchanged here.
+- `warp`, `ghost` and `liveportrait` keep a face and are **reduced risk, not de-identified**; `ghost` and `liveportrait` are research use only and their outputs stay local. `ghost` is the default swap option (owner decision, 2026-10-29); `fill` stays the shareable fallback.
 - Stills of these outputs are not included in this repository.

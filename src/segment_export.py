@@ -19,7 +19,7 @@ events last --default-len-s), or the whole clip with --whole / without --annotat
                                  the subject's face was not found)
       ..._desc-points_video.mp4  (default) landmarks drawn on a blank canvas
       ..._desc-swap_video.mp4    face swap to a synthetic donor (--deid swap, src/deid_swap.py; the backend,
-                                 warp, ghost or liveportrait, comes from --swap-config; "ghost" is also
+                                 ghost (default), warp or liveportrait, comes from --swap-config; "ghost" is also
                                  accepted as an alias of the variant). REDUCED RISK, NOT DE-IDENTIFIED: its
                                  sidecar says Deidentified false; ghost and liveportrait output is research
                                  use only (ResearchUseOnly true).
@@ -62,7 +62,7 @@ def parse_args(argv=None):
     p.add_argument("--face-model", default=None)
     p.add_argument("--deid", default="fill,points",
                    help="comma list of video variants: fill (default; faces painted solid), points (default; "
-                        "landmarks only), swap (face swap to a donor; needs --swap-config; alias ghost), blur (LOCAL REVIEW ONLY, NOT FOR "
+                        "landmarks only), swap (face swap to a donor; needs --swap-config; backend ghost unless the config names another; alias ghost), blur (LOCAL REVIEW ONLY, NOT FOR "
                         "SHARING: written under --raw-root unless --blur-in-export)")
     p.add_argument("--blur-in-export", action="store_true",
                    help="put the blur variant in the export too (marked NotForSharing in its sidecar)")

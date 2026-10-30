@@ -3,9 +3,10 @@
 A swapper replaces every face in a frame with a donor face while keeping expression and head motion.
 Swap output is REDUCED RISK, NOT DE-IDENTIFIED: the outline, hair, skin colour, pose and expression of the
 subject remain and src/deid_check.py measures how much identity is left, so its sidecars carry
-Deidentified: false. The face fill (`--deid fill`) stays the only shareable default.
+Deidentified: false. The face fill (`--deid fill`) stays the overall default, the shareable fallback and
+the only mode treated as shareable.
 
-Backends:
+Backends (`ghost` is the default swap backend: a configuration without "backend" uses it):
 - `warp` (src/deid_warp.py): landmark-driven warp of a synthetic donor; OpenCV and numpy only.
 - `ghost` (src/deid_ghost.py): GHOST AEI-Net generator, CPU port. RESEARCH USE ONLY.
 - `liveportrait` (src/deid_liveportrait.py): LivePortrait reenactment of the donor. RESEARCH USE ONLY.
@@ -21,7 +22,7 @@ Configuration is a JSON file (`--swap-config`, or SEMI_SIGNALS_SWAP_CONFIG):
      "donor_licence": "synthetic: rendered by src/deid_warp.render_donor (seed 2)",
      "geometry": "donor"}                   # or "subject"; see src/deid_warp.py
 
-    {"backend": "ghost", "licence_reviewed": true, "research_use_acknowledged": true,
+    {"backend": "ghost", "licence_reviewed": true, "research_use_acknowledged": true,   # default backend
      "models": {"code": "/path/third_party_local/ghost", "generator": "/path/G_unet_2blocks.pth",
                 "id_embedder": "/path/backbone.pth"},
      "donor": ..., "donor_landmarks": ..., "donor_licence": ..., "device": "cpu"}
@@ -29,6 +30,9 @@ Configuration is a JSON file (`--swap-config`, or SEMI_SIGNALS_SWAP_CONFIG):
     {"backend": "liveportrait", "licence_reviewed": true, "research_use_acknowledged": true,
      "models": {"code": "/path/third_party_local/LivePortrait", "weights": "/path/weights/liveportrait"},
      "donor": ..., "donor_landmarks": ..., "donor_licence": ..., "device": "cpu"}
+
+Third-party code, weights and donor images are not redistributed by this project: the user fetches them from
+the official sources and accepts their terms (docs/FACE_SWAP_LICENCES.md).
 
 Donor faces must be synthetic or clearly licensed, never a real person without a licence. Without a valid
 configuration every entry point raises SwapNotConfigured with what is missing; nothing is downloaded
@@ -66,6 +70,7 @@ class FaceSwapper(Protocol):
 REQUIRED = {"warp": ("face_mesh",), "ghost": ("code", "generator", "id_embedder"),
             "liveportrait": ("code", "weights")}
 RESEARCH_ONLY = ("ghost", "liveportrait")
+DEFAULT_BACKEND = "ghost"          # the default when swap mode is chosen; fill stays the shareable default
 DEID_STATUS = "reduced risk, not de-identified"
 _REGISTRY: dict[str, type] = {}
 
@@ -90,10 +95,15 @@ def load_config(path: str | os.PathLike | None) -> dict:
     return json.loads(p.read_text())
 
 
+def backend_of(cfg: dict) -> str:
+    """The configured backend, or DEFAULT_BACKEND ("ghost") when the configuration does not name one."""
+    return cfg.get("backend") or DEFAULT_BACKEND
+
+
 def check_config(cfg: dict) -> list[str]:
-    """Problems with a configuration (empty list = usable)."""
+    """Problems with a configuration (empty list = usable). A missing "backend" means DEFAULT_BACKEND."""
     problems = []
-    backend = cfg.get("backend")
+    backend = backend_of(cfg)
     if backend not in REQUIRED:
         problems.append(f"backend {backend!r} unknown (known: {', '.join(REQUIRED)})")
         return problems
@@ -118,6 +128,7 @@ def check_config(cfg: dict) -> list[str]:
 
 def make_swapper(config_path=None) -> FaceSwapper:
     cfg = load_config(config_path)
+    cfg = dict(cfg, backend=backend_of(cfg))
     problems = check_config(cfg)
     if problems:
         raise SwapNotConfigured("face swap not configured:\n  - " + "\n  - ".join(problems))
