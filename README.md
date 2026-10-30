@@ -1,5 +1,11 @@
 # semi-signals
 
+[![Hugging Face | Detector A](https://img.shields.io/badge/Hugging%20Face-Detector%20A-yellow?logo=huggingface)](https://huggingface.co/Einse57/semi-signals-detector-a)
+
+The seizure detector model (Detector A) is on [Hugging Face](https://huggingface.co/Einse57/semi-signals-detector-a).
+The MediaPipe Face Landmarker also runs on OpenVINO (CPU, Arc iGPU and NPU tested on Core Ultra 9 285H):
+[docs/FACE_OPENVINO.md](docs/FACE_OPENVINO.md).
+
 Real-time skeleton-based motion analysis — live body + hand tracking with per-region L/R motion quantification, accelerated via OpenVINO on Intel iGPU.
 
 Inspired by [VSViG (Xu et al., ECCV 2024)](https://arxiv.org/abs/2311.14775) but extends its input pipeline with 21-keypoint hand tracking and finger-level motion. See [JOINT_MAPPING.md](src/JOINT_MAPPING.md) for a detailed comparison.
@@ -127,6 +133,12 @@ live viewer and an annotation tool:
   to min(onset + 120 s, recording end) + 60 s; 26/33 with an onset-only -30/+60 s window) at 4.3 false alarms/h.
   On a second site (MCEC_Seizure, 4 patients, skeletons only) a frozen body-only model caught 2/5 at 11.3/h,
   with chance-level per-second ranking: [docs/mcec_crosssite_results.md](docs/mcec_crosssite_results.md).
+
+![Live viewer: pose overlay, Detector A probability strip in alarm, top drivers and per-region motion](docs/img/live_detector_a.png)
+*Live viewer on the public sample clip `pat10/Sz2P` (source video already pixelated): pose overlay, Detector A alarm and drivers.*
+
+![Annotation tool in face mode with the de-identification dialog: Fill selected, Landmarker MediaPipe or OpenVINO](docs/img/annotation_face_fill.png)
+*Annotation tool, face mode, on a Fill export of an actor clip: the de-identification dialog with the Landmarker picker.*
 
 ### Quick start: double-click start.cmd (or run .\start.ps1)
 On Windows, double-click `start.cmd` in the repo folder. It sets up `.venv` on first use (it asks first) and

@@ -29,6 +29,7 @@ No SFHQ images or SFHQ-donor swaps are in this repository. The only media in it 
 | 18 | GRID audio-visual speech corpus (Cooke, Barker, Cunningham, Shao) | <https://zenodo.org/records/3625687> | CC BY 4.0 | not redistributed / fetched by user; numbers only, plus Figure 1 (row 18a) |
 | 18a | Figure `docs/figures/face_deid_grid_lwwy7p_fill_mosaic_blur.png` (GRID `lwwy7p` frames 20 and 45: original, fill, mosaic8, mosaic16, blur; no donor, no swap) | <https://zenodo.org/records/3625687> | CC BY 4.0 (modified derivative), not MIT | committed with attribution in NOTICE, `docs/figures/README.md` and FACE_DEID_TRADEOFF.md |
 | 19 | Intel IoT DevKit sample videos | <https://github.com/intel-iot-devkit/sample-videos> | CC BY 4.0 | not redistributed / fetched by user; numbers only |
+| 19a | Screenshot `docs/img/annotation_face_fill.png` (Fill export of `head-pose-face-detection-female-and-male.mp4` in the annotation tool) | <https://github.com/intel-iot-devkit/sample-videos> | CC BY 4.0 (modified derivative), not MIT | committed with attribution in NOTICE and `docs/img/README.md` |
 
 Not used: InsightFace inswapper (licence by email), FLUX.1 [schnell] (gated), SCRFD detectors, GHOST
 discriminators, v1 generator, super-resolution code and weights, AdaptiveWingLoss, MXNet landmarks, X-Pose and

@@ -33,6 +33,12 @@ One figure is included: docs/figures/face_deid_grid_lwwy7p_fill_mosaic_blur.png,
   clip lwwy7p (speaker s14), M. Cooke, J. Barker, S. Cunningham and X. Shao (2006), The GRID audio-visual
   speech corpus, https://doi.org/10.5281/zenodo.3625687. Modified: face filled, pixelated or blurred, panels
   arranged and captioned. Licensed CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/), not MIT.
+Two README screenshots are included (docs/img/README.md):
+  docs/img/live_detector_a.png, a frame of pat10/Sz2P from the WU-SAHZU-EMU-Video dataset (VSViG authors,
+  Apache-2.0), with the viewer overlay and panels added.
+  docs/img/annotation_face_fill.png, a frame of head-pose-face-detection-female-and-male.mp4, Intel IoT
+  DevKit sample videos, Intel Corporation, https://github.com/intel-iot-devkit/sample-videos. Modified:
+  faces filled, tool windows added. Licensed CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/), not MIT.
 Face-check models (YuNet, MIT; SFace, Apache-2.0; OpenCV Zoo) and face-swap code and weights are fetched by
 the user and not included; licences in docs/FACE_SWAP_LICENCES.md.
 Files derived from MediaPipe (https://github.com/google-ai-edge/mediapipe), Copyright The MediaPipe
