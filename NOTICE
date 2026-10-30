@@ -9,6 +9,10 @@ third_party/vsvig/VSViG.py and third_party/vsvig/dy_point_order.pt
   "VSViG: Real-Time Video-Based Seizure Detection via Skeleton-Based Spatiotemporal ViG", ECCV 2024.
   Licensed under the Apache License, Version 2.0 (third_party/vsvig/LICENSE).
   Modified: removed timm/torchvision imports; the partition file path is resolved next to VSViG.py.
+  dy_point_order.pt is unmodified: a non-learned table of 1000 point orders (each a permutation of the 15
+  keypoints in five 3-point groups) that the upstream README says was randomly generated. Source:
+  https://github.com/xuyankun/VSViG/blob/1026e7e7f2287b96f3cc375830f2836ffdf4588e/dy_point_order.pt,
+  sha256 9aa778ca1221f47b6afe0242787becfdfaae3f2424b54dd15a48c585ef0a0ced, Apache-2.0.
 
 Models and data used at run time are not included and keep their own licences:
   VSViG-base weights and the WU-SAHZU-EMU-Video dataset (Apache-2.0, by the VSViG authors);
