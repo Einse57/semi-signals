@@ -45,6 +45,8 @@ notes: [docs/FACE_LANDMARKS.md](docs/FACE_LANDMARKS.md). By default the face sta
 region (`--face-preprocess none`); for room video use `--face-preprocess coco-head` (head crop from the body
 pose) or `detect` (find, crop and align the face).
 
+Optional OpenVINO face backend (`--face-backend openvino --face-device CPU|GPU|NPU|AUTO`; MediaPipe is the default): [docs/FACE_OPENVINO.md](docs/FACE_OPENVINO.md).
+
 ## Performance
 
 Tested on Intel Core Ultra 7 165U (Meteor Lake) — Xe-LPG iGPU, AI Boost NPU 3720.
