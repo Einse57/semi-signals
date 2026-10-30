@@ -19,3 +19,17 @@ Models and data used at run time are not included and keep their own licences:
   Blendshape V2), Google, Apache-2.0, https://github.com/google-ai-edge/mediapipe. The model cards
   describe AR/entertainment use and state the models are not intended for life-critical decisions;
   see docs/FACE_LANDMARKS.md.
+
+Face de-identification measurements (docs/FACE_SWAP_LICENCES.md, docs/FACE_DEID_TRADEOFF.md) were made on
+clips that are not included in this repository:
+  GRID audio-visual speech corpus, M. Cooke, J. Barker, S. Cunningham and X. Shao (2006),
+  https://doi.org/10.5281/zenodo.3625687, CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/).
+  Intel IoT DevKit sample videos, Intel Corporation, https://github.com/intel-iot-devkit/sample-videos,
+  CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/).
+Only numbers derived from the clips are included; no frames.
+Optional face-check models fetched by scripts/fetch_models.py --face-check, not included: YuNet (OpenCV Zoo,
+MIT) and SFace (OpenCV Zoo, Apache-2.0). Optional face-swap backends (src/deid_ghost.py,
+src/deid_liveportrait.py) load third-party code and weights from a local location; none of it is included,
+and their licences are listed in docs/FACE_SWAP_LICENCES.md.
+Outputs of the face-swap backends and their weights stay local and are used for non-commercial research only;
+docs/FACE_SWAP_LICENCES.md ("Licence evidence and use") lists each component's licence and what may be published.

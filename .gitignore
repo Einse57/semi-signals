@@ -42,3 +42,13 @@ private_mapping*.csv
 # research-only face-swap code and weights (GHOST, LivePortrait, InsightFace): local only, never committed
 third_party_local/
 *.pth
+
+# weights, arrays and stills: never committed (licence audit 2026-10-29; video is covered by the rules above
+# and by the raw-location check in src/segment_export.py)
+*.safetensors
+*.ckpt
+*.task
+*.tflite
+*.npy
+*.npz
+screens/
