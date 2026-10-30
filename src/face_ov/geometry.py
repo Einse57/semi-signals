@@ -1,3 +1,11 @@
+# Derived from MediaPipe (https://github.com/google-ai-edge/mediapipe), Apache-2.0, modified:
+#   mediapipe/calculators/tflite/ssd_anchors_calculator.cc, tensors_to_detections_calculator.cc,
+#   mediapipe/calculators/util/{non_max_suppression,detection_projection,detections_to_rects,
+#   rect_transformation,landmark_projection,landmarks_smoothing}_calculator.cc, one_euro_filter.cc,
+#   mediapipe/calculators/tensor/image_to_tensor_converter_opencv.cc, tensors_to_landmarks_calculator.cc,
+#   mediapipe/tasks/cc/vision/face_landmarker/face_blendshapes_graph.cc (146-landmark subset),
+#   face_landmarks_detector_graph.cc, mediapipe/tasks/cc/vision/face_detector/face_detector_graph.cc
+# Copyright The MediaPipe Authors. Re-implemented in Python/numpy; see LICENSES/Apache-2.0.txt and NOTICE.
 """Pure-numpy geometry of the MediaPipe Face Landmarker pipeline (no OpenVINO, no MediaPipe needed).
 
 Every function names the MediaPipe file whose behaviour it follows (google-ai-edge/mediapipe,
@@ -197,6 +205,18 @@ def transform_rect(r: Rect, img_w, img_h, scale_x=1.5, scale_y=1.5, shift_x=0.0,
         long_side = max(w * img_w, h * img_h)
         w, h = long_side / img_w, long_side / img_h
     return Rect(xc, yc, w * scale_x, h * scale_y, rot)
+
+
+def rect_iou(a: Rect, b: Rect) -> float:
+    """association_norm_rect_calculator.cc: IoU of two rects as axis-aligned boxes (rotation ignored)."""
+    ax0, ay0, bx0, by0 = a.x_center - a.width / 2, a.y_center - a.height / 2, b.x_center - b.width / 2, b.y_center - b.height / 2
+    iw = min(ax0 + a.width, bx0 + b.width) - max(ax0, bx0)
+    ih = min(ay0 + a.height, by0 + b.height) - max(ay0, by0)
+    if iw <= 0 or ih <= 0:
+        return 0.0
+    inter = iw * ih
+    union = a.width * a.height + b.width * b.height - inter
+    return float(inter / union) if union > 0 else 0.0
 
 
 def detection_to_roi(box, kps, img_w, img_h) -> Rect:

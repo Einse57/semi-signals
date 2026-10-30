@@ -31,9 +31,16 @@ One figure is included: docs/figures/face_deid_grid_lwwy7p_fill_mosaic_blur.png,
   arranged and captioned. Licensed CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/), not MIT.
 Face-check models (YuNet, MIT; SFace, Apache-2.0; OpenCV Zoo) and face-swap code and weights are fetched by
 the user and not included; licences in docs/FACE_SWAP_LICENCES.md.
-src/face_ov/ (optional OpenVINO face backend) re-implements in Python the MediaPipe Face Landmarker
-graph and calculators (anchors, detection decoding, weighted NMS, rect transforms, landmark projection,
-One Euro smoothing). No MediaPipe source is copied; constants (anchor options, rect scales, landmark
-indices including the 146-index blendshape subset, filter settings) are taken from
-https://github.com/google-ai-edge/mediapipe, Copyright The MediaPipe Authors, Apache License 2.0.
-Each function names the MediaPipe file it follows; see docs/FACE_OPENVINO.md.
+Files derived from MediaPipe (https://github.com/google-ai-edge/mediapipe), Copyright The MediaPipe
+Authors, Apache License 2.0 (LICENSES/Apache-2.0.txt). Modified: the C++ graphs and calculators are
+re-implemented in Python/numpy for the optional OpenVINO face backend; no MediaPipe source file is copied.
+Constants taken from MediaPipe: SSD anchor options, detection decoding and NMS settings, rect/ROI scales,
+landmark indices including the 146-index blendshape subset, One Euro filter settings, and the face
+geometry camera and Procrustes settings (the canonical face mesh and weights are read at run time from
+the user-fetched model bundle). Each file starts with a header naming the MediaPipe files it follows.
+  src/face_ov/geometry.py       detector anchors, decoding, weighted NMS, rect transforms, landmark
+                                projection, blendshape input, One Euro smoothing
+  src/face_ov/landmarker.py     Face Landmarker graph (detector, tracking, rect association, landmarks,
+                                blendshapes)
+  src/face_ov/face_geometry.py  facial transformation matrix (geometry pipeline, Procrustes solver)
+The rest of the repository is MIT (LICENSE). See docs/FACE_OPENVINO.md.

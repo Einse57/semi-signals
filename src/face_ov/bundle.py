@@ -1,4 +1,4 @@
-"""Unpack the MediaPipe face_landmarker.task bundle (a zip of three .tflite models) at run time.
+"""Unpack the MediaPipe face_landmarker.task bundle (a zip of three .tflite models and the face geometry metadata) at run time.
 
 The bundle is not redistributed here: it is downloaded from Google's model storage and checked against
 its SHA-256 before use. Models: Apache-2.0 (see the MediaPipe Face Landmarker model card).
@@ -11,6 +11,8 @@ import zipfile
 from pathlib import Path
 
 MODEL_FILES = ("face_detector.tflite", "face_landmarks_detector.tflite", "face_blendshapes.tflite")
+GEOMETRY_FILE = "geometry_pipeline_metadata_landmarks.binarypb"      # canonical face mesh + Procrustes weights
+BUNDLE_FILES = MODEL_FILES + (GEOMETRY_FILE,)
 
 
 def sha256_file(path) -> str:
@@ -28,7 +30,8 @@ def default_cache_dir() -> Path:
 
 
 def unpack_task(task_path, expected_sha256: str | None = None, out_dir=None) -> dict[str, Path]:
-    """Extract the three models into out_dir/<sha256[:16]>/ (once) and return {name: path}.
+    """Extract the three models and the geometry metadata into out_dir/<sha256[:16]>/ (once) and return
+    {name: path}.
     Raises ValueError when expected_sha256 is given and does not match."""
     task_path = Path(task_path)
     if not task_path.is_file():
@@ -37,15 +40,15 @@ def unpack_task(task_path, expected_sha256: str | None = None, out_dir=None) -> 
     if expected_sha256 and digest.lower() != expected_sha256.lower():
         raise ValueError(f"SHA-256 mismatch for {task_path}: {digest} != {expected_sha256}")
     out = Path(out_dir or default_cache_dir()) / digest[:16]
-    paths = {n: out / n for n in MODEL_FILES}
+    paths = {n: out / n for n in BUNDLE_FILES}
     if not all(p.is_file() for p in paths.values()):
         out.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(task_path) as z:
             names = set(z.namelist())
-            missing = [n for n in MODEL_FILES if n not in names]
+            missing = [n for n in BUNDLE_FILES if n not in names]
             if missing:
                 raise ValueError(f"{task_path} lacks {missing}")
-            for n in MODEL_FILES:
+            for n in BUNDLE_FILES:
                 tmp = out / (n + ".part")
                 tmp.write_bytes(z.read(n))
                 tmp.replace(out / n)
