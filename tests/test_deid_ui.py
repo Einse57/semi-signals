@@ -17,7 +17,7 @@ from src import segment_store as S
 
 REPO = Path(__file__).resolve().parent.parent
 MODEL = REPO / "models" / "face_landmarker.task"
-IMG = Path("/workspace/vsvig/facetest/business-person.png")
+from tests.assets import TEST_IMAGE as IMG    # noqa: E402  (FACE_TEST_IMAGE overrides)
 
 
 def _ring(cx, cy, r=20):

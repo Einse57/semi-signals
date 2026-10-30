@@ -12,7 +12,7 @@ from src import review_video as R
 from tests.test_review_autosave import _clip
 
 FIXTURE = Path(__file__).parent / "fixtures" / "annotation_v1_body.eaf"
-FIXTURE_VIDEO = "/tmp/semi_signals_fixture/clip.mp4"      # path the fixture was written for
+FIXTURE_VIDEO = "/tmp/semi_signals_fixture/clip.mp4"      # path the fixture was written for (file URLs normalised)
 
 
 def _fixture_ann(video):
@@ -31,6 +31,7 @@ def _fixture_ann(video):
 
 def _norm(xml: str) -> str:
     xml = re.sub(r'DATE="[^"]*"', 'DATE=""', xml)
+    xml = re.sub(r'"file:///[^"]*/([^"/]+)"', r'"file:///media/\1"', xml)     # folder of the clip: any OS
     return re.sub(r"urn:nl-mpi-tools-elan-eaf:[0-9a-f-]+", "urn:x", xml)
 
 
@@ -70,9 +71,8 @@ def test_old_body_eaf_reads_as_body_events():
     assert not any(t in d["tiers"] for t in A.FACE_TIERS)
 
 
-def test_body_only_eaf_is_unchanged_by_modes():
-    v = Path(FIXTURE_VIDEO)
-    v.parent.mkdir(parents=True, exist_ok=True)
+def test_body_only_eaf_is_unchanged_by_modes(tmp_path):
+    v = tmp_path / Path(FIXTURE_VIDEO).name
     v.write_bytes(b"fixture video bytes")
     for mode in (None, "body"):                 # events without a mode (old) or explicitly body
         ann = _fixture_ann(v)

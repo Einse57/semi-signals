@@ -159,4 +159,5 @@ outside `--out` (checked). Keep it with the source videos.
 - Intel IoT DevKit sample videos (`head-pose-face-detection-female-and-male.mp4`,
   `face-demographics-walking-and-pause.mp4`),
   [github.com/intel-iot-devkit/sample-videos](https://github.com/intel-iot-devkit/sample-videos), CC BY 4.0.
-- MediaPipe's sample image `business-person.png` (used by two tests when present; skipped otherwise).
+- MediaPipe's sample image `business-person.png` (used by five tests when present, see the README Tests
+  section; skipped otherwise).

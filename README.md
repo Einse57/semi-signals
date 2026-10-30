@@ -78,6 +78,20 @@ semi-signals/
 └── README.md
 ```
 
+## Tests
+
+```bash
+pip install -r requirements-demo.txt -r requirements-dev.txt
+pytest
+```
+
+`pytest.ini` collects `tests/` only. Tests that need local files are skipped without them:
+- face models: `python scripts/fetch_models.py --face --face-check --skip-data --skip-vsvig`
+- MediaPipe's sample image (five tests): download
+  [business-person.png](https://storage.googleapis.com/mediapipe-assets/business-person.png) to
+  `data/facetest/business-person.png`, or set `FACE_TEST_IMAGE` to its path
+- OpenVINO face parity on a video: set `FACE_OV_CLIP` to a short clip with one face
+
 ## Seizure detection (research)
 
 > **Research use only. Not a medical device and not a diagnostic.** Trained on one hospital's data and

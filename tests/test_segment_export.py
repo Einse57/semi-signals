@@ -77,7 +77,7 @@ def test_raw_root_inside_repo_must_be_ignored(tmp_path):
 
 
 MODEL = REPO / "models" / "face_landmarker.task"
-IMG = Path("/workspace/vsvig/facetest/business-person.png")
+from tests.assets import TEST_IMAGE as IMG    # noqa: E402  (FACE_TEST_IMAGE overrides)
 
 
 @pytest.mark.skipif(not (MODEL.exists() and IMG.exists()), reason="model file or test image not present")
