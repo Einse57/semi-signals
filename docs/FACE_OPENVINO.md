@@ -13,7 +13,7 @@ MediaPipe Tasks stays the default backend (`--face-backend mediapipe`).
 
 ```bash
 pip install openvino                                    # already in requirements.txt
-python scripts/fetch_models.py --face --skip-data       # models/face_landmarker.task, sha256-checked
+python scripts/fetch_models.py --face --face-check --skip-data   # face model + fill check files, sha256-checked
 ```
 
 The bundle is fetched by the user and checked against the pinned SHA-256

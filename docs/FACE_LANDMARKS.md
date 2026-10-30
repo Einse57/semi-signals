@@ -43,8 +43,15 @@ CPU|GPU|NPU|AUTO` runs the same three models with OpenVINO instead (MediaPipe st
 
 ```bash
 pip install mediapipe                                  # optional dependency
-python scripts/fetch_models.py --face --skip-data      # models/face_landmarker.task, sha256-checked
+# mediapipe brings opencv-contrib-python back: keep a single OpenCV package
+pip uninstall -y opencv-contrib-python opencv-python-headless
+pip install --force-reinstall --no-deps opencv-python
+python scripts/fetch_models.py --face --face-check --skip-data
 ```
+
+`--face` fetches `models/face_landmarker.task`; `--face-check` fetches the YuNet face detector and the warp
+files (all sha256-checked). Without YuNet, fill exports run on landmarks only and can't be marked shareable.
+In the launcher, **Fetch models & sample data** fetches both when **Face (MediaPipe)** is ticked.
 
 The model bundle is not in this repository. Source:
 `https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task`

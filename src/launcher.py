@@ -181,13 +181,13 @@ def has_mediapipe() -> bool:
 
 def fetch_cmd(data_dir: Path, models_dir: Path, vsvig: bool | None = None, face: bool = False) -> list[str]:
     """VSViG is optional and its conversion needs torch; skip it when torch is not installed.
-    face: also fetch the optional MediaPipe face model."""
+    face: also fetch the optional MediaPipe face model and the files for the fill check (--face-check)."""
     cmd = [sys.executable, "-u", str(ROOT / "scripts" / "fetch_models.py"),
            "--models-dir", str(models_dir), "--data-dir", str(data_dir)]
     if not (has_torch() if vsvig is None else vsvig):
         cmd.append("--skip-vsvig")
     if face:
-        cmd.append("--face")
+        cmd += ["--face", "--face-check"]
     return cmd
 
 

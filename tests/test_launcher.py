@@ -40,7 +40,8 @@ def test_commands_parse_in_the_tools(tmp_path):
     assert "--skip-vsvig" in L.fetch_cmd(d, m, vsvig=False) and "--skip-vsvig" not in L.fetch_cmd(d, m, vsvig=True)
     assert not a.face and "--face" not in v                                       # face is opt-in
     assert run_seizure_demo.parse_args(L.viewer_cmd(dict(s, face=True), d, m)[4:]).face
-    assert "--face" in L.fetch_cmd(d, m, vsvig=False, face=True) and "--face" not in L.fetch_cmd(d, m, vsvig=False)
+    assert {"--face", "--face-check"} <= set(L.fetch_cmd(d, m, vsvig=False, face=True))
+    assert not {"--face", "--face-check"} & set(L.fetch_cmd(d, m, vsvig=False))
 
 
 def test_settings_roundtrip_and_proxy(tmp_path):
