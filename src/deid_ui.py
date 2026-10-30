@@ -84,7 +84,16 @@ class DeidSelector:
         missing = O.weights_problems(m, s["swap_config"] or None, self.models_dir)
         if missing:
             err.append(O.missing_weights_message(m, missing))
+        if s["shareable"]:
+            err += ["Export for sharing: " + p for p in O.fill_check_problems(self.models_dir)]
         return err
+
+    def notes(self) -> list[str]:
+        """Warnings that do not stop an export (fill without YuNet: landmark-only, not shareable)."""
+        s = self.state()
+        if s["deid_method"] != "fill" or s["shareable"]:
+            return []
+        return O.fill_check_problems(self.models_dir)
 
     def changed(self):
         m = self.method()
@@ -96,7 +105,7 @@ class DeidSelector:
             self.share.set(False)
         self.share_cb.configure(state="normal" if O.is_shareable(m) else "disabled")
         self.status.configure(text=f"{O.title(m)}: {O.label_text(m)}", foreground=label_colour(m))
-        self.weights.configure(text="\n".join(p for p in self.problems() if m != O.ORIGINAL))
+        self.weights.configure(text="\n".join(p for p in self.problems() + self.notes() if m != O.ORIGINAL))
         if self.on_change:
             self.on_change()
 

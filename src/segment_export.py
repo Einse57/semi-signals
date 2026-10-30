@@ -16,7 +16,10 @@ events last --default-len-s), or the whole clip with --whole / without --annotat
       --blur-in-export, and is then marked NotForSharing.
   de-identified (under --out):
       ..._desc-fill_video.mp4    (default) every face found painted with a solid colour (whole frame where
-                                 the subject's face was not found)
+                                 the subject's face was not found); faces YuNet finds that the landmarker
+                                 missed are filled as padded boxes, and YuNet checks every output frame
+                                 (src/fill_guard.py): any face found there, or no YuNet model, means the
+                                 sidecar says Shareable false and lists the frames (UnmaskedFaceCheck)
       ..._desc-points_video.mp4  (default) landmarks drawn on a blank canvas
       ..._desc-swap_video.mp4    face swap to a synthetic donor (--deid swap, src/deid_swap.py; the backend,
                                  ghost (default), warp or liveportrait, comes from --swap-config; "ghost" is also
@@ -26,8 +29,8 @@ events last --default-len-s), or the whole clip with --whole / without --annotat
       ..._landmarks.nc (+ .json) movement-layout landmarks, ..._blendshapes.nc
       ..._events.tsv (+ .json)   from the .eaf, times relative to the segment start, no notes
       sub-<id>_scans.tsv         acq_time shifted (random per subject, year <= 1925) or n/a
-De-identified here means reduced re-identification risk, not anonymous: faces the landmarker does not
-find are not masked, and landmarks can be biometric identifiers.
+De-identified here means reduced re-identification risk, not anonymous: faces neither the landmarker nor
+YuNet finds are not masked, and landmarks can be biometric identifiers.
 """
 from __future__ import annotations
 
@@ -44,6 +47,7 @@ import numpy as np
 from src import segment_store as S
 from src import deid_options as O
 from src.deid_swap import DEID_STATUS, RESEARCH_ONLY
+from src import fill_guard as G
 
 REPO = Path(__file__).resolve().parent.parent
 VARIANTS = ("fill", "points", "swap", "blur")       # --deid (CLI)
@@ -95,14 +99,32 @@ def parse_args(argv=None):
     p.add_argument("--no-bystanders", action="store_true",
                    help="mask only the subject's face (default: also every other face the landmarker finds)")
     p.add_argument("--device", default="cpu", help="for --face-preprocess coco-head (body pose)")
+    p.add_argument("--yunet-model", default=str(REPO / "models" / G.MODEL_NAME),
+                   help="YuNet face detector for the fill fallback and the unmasked-face check (fill only)")
+    p.add_argument("--yunet-score", type=float, default=G.DEFAULT_SCORE, help="YuNet score threshold")
+    p.add_argument("--fallback-pad", type=float, default=G.DEFAULT_PAD,
+                   help="padding of YuNet fallback boxes, fraction of the box size on each side")
     return p.parse_args(argv)
 
 
 # ── de-identified renders ────────────────────────────────────
-def mask_faces(frame, lm, missing="frame", grow=0.25, others=(), style="fill"):
+def landmark_mask(shape, faces, grow=0.25):
+    """uint8 mask of the grown convex hulls of the landmark faces."""
+    mask = np.zeros(shape[:2], np.uint8)
+    for f in faces:
+        p = np.asarray(f, np.float32)[:, :2]
+        c = p.mean(0)
+        cv2.fillConvexPoly(mask, cv2.convexHull(((p - c) * (1 + grow) + c).astype(np.int32)), 255)
+    return mask
+
+
+def mask_faces(frame, lm, missing="frame", grow=0.25, others=(), style="fill", boxes=()):
     """Mask the convex hull (grown by `grow` x face size) of the subject's face landmarks `lm` and of
     every other face in `others` (bystanders): style "fill" paints it with its mean colour, "blur"
-    pixelates and blurs it (local review only). No subject face: the whole frame (missing="frame")."""
+    pixelates and blurs it (local review only). No subject face: the whole frame (missing="frame").
+    `boxes` (x0, y0, x1, y1): extra regions for style "fill" (YuNet fallback, src/fill_guard.py), painted
+    together with the hulls."""
+    boxes = list(boxes) if style == "fill" else []
     out = frame.copy()
     h, w = frame.shape[:2]
     k = max(31, (max(h, w) // 8) | 1)
@@ -112,7 +134,7 @@ def mask_faces(frame, lm, missing="frame", grow=0.25, others=(), style="fill"):
         faces = list(others)
     else:
         faces = [lm] + list(others)
-    if not faces:
+    if not faces and not boxes:
         return out
     mask = np.zeros((h, w), np.uint8)
     size = 8.0
@@ -121,6 +143,8 @@ def mask_faces(frame, lm, missing="frame", grow=0.25, others=(), style="fill"):
         c = p.mean(0)
         size = max(size, float(max(np.ptp(p[:, 0]), np.ptp(p[:, 1]))))
         cv2.fillConvexPoly(mask, cv2.convexHull(((p - c) * (1 + grow) + c).astype(np.int32)), 255)
+    for x0, y0, x1, y1 in boxes:
+        mask[y0:y1, x0:x1] = 255
     if not mask.any():
         return _whole(out, k, style)
     if style == "fill":                  # solid mean colour of the face area
@@ -390,6 +414,10 @@ def main(argv=None):
     if any(v in variants for v in MASK_STYLES + ("swap",)) and not a.no_bystanders:
         from src.face_estimator import FaceEstimator
         multi = FaceEstimator(model_path=a.face_model, num_faces=8, blendshapes=False)
+    guard = make_fill_guard(a) if "fill" in variants else None
+    if guard is not None and not guard.available:
+        print("[fill check] " + guard.problem, flush=True)
+    blocked = []
     S.dataset_description(out, deidentified=True)
     S.dataset_description(raw_root, name="semi-signals segments (raw, local only)", deidentified=False)
     rows = []
@@ -403,6 +431,8 @@ def main(argv=None):
             pre.reset()
             if swapper is not None and hasattr(swapper, "reset"):
                 swapper.reset()                                  # per-segment face tracks (warp geometry)
+            if guard is not None:
+                guard.reset()
             ws = {"raw": writer(R.video("raw"), fps, (W, H))}
             for v in export_variants:
                 ws[v] = writer(P.video(v), fps, (W, H))
@@ -426,7 +456,16 @@ def main(argv=None):
                     oth = other_faces(multi, frame, lm)
                     n_other.append(len(oth))
                 for v in MASK_STYLES:
-                    if v in ws:
+                    if v not in ws:
+                        continue
+                    if v == "fill" and guard is not None:
+                        whole = (lm is None or not np.isfinite(lm).all()) and a.missing_face == "frame"
+                        faces = [] if whole else ([lm] if lm is not None else []) + list(oth or [])
+                        bx = [] if whole else guard.boxes(frame, landmark_mask(frame.shape, faces))
+                        o = mask_faces(frame, lm, a.missing_face, others=oth or [], style=v, boxes=bx)
+                        guard.check(o, fi - f0)
+                        ws[v].write(o)
+                    else:
                         ws[v].write(mask_faces(frame, lm, a.missing_face, others=oth or [], style=v))
                 if "swap" in ws:
                     faces = ([lm] if lm is not None else []) + list(oth or [])
@@ -443,7 +482,11 @@ def main(argv=None):
                                             "faces it misses are not masked, check before sharing")
             miss = ("; frames without the subject's face masked whole" if a.missing_face == "frame"
                     else "; frames without the subject's face NOT masked")
-            descs = dict(fill="subject face area (landmark hull grown 25%)" + bys + " painted with its mean colour" + miss,
+            fb = ("; faces YuNet found outside those areas filled as padded boxes; every output frame checked with "
+                  "YuNet (UnmaskedFaceCheck)" if guard is not None and guard.available else
+                  "; YuNet not available: no fallback boxes and no unmasked-face check")
+            descs = dict(fill="subject face area (landmark hull grown 25%)" + bys + " painted with its mean colour" + miss
+                         + (fb if guard is not None else ""),
                          blur="LOCAL REVIEW ONLY, NOT FOR SHARING: face areas pixelated and blurred; face detectors "
                               "still find faces in blurred frames" + miss,
                          swap="REDUCED RISK, NOT DE-IDENTIFIED: faces replaced by a donor face (face swap, "
@@ -462,6 +505,14 @@ def main(argv=None):
                     extra["Shareable"] = O.is_shareable(v)
                     if not O.is_shareable(v):
                         extra["Deidentified"] = False
+                if v == "fill" and guard is not None:
+                    chk = guard.result()
+                    extra["UnmaskedFaceCheck"] = chk
+                    if not chk["Clean"]:
+                        extra["Shareable"] = False
+                        extra["ShareableBlockedReason"] = chk["Reason"]
+                        if chk["Ran"]:
+                            extra["Deidentified"] = False
                 if v == "swap":
                     extra["Shareable"] = False
                 if v == "swap":
@@ -506,6 +557,10 @@ def main(argv=None):
                              acq_time=a.acq_time or "", date_shift_days="" if shift is None else shift,
                              raw_video=str(R.video("raw")),
                              exported=_dt.datetime.now().astimezone().isoformat(timespec="seconds")))
+            if guard is not None:
+                print(guard.summary(f"sub-{sub} run-{run:02d}"), flush=True)
+                if not guard.result()["Clean"]:
+                    blocked.append(f"run-{run:02d}")
             print(f"[segment] sub-{sub} run-{run:02d}: {seg['start']:.2f}-{seg['end']:.2f} s, {len(T)} frames, "
                   f"face in {found}; {', '.join(export_variants)}" + (f"; local: raw, {', '.join(local_variants)}" if local_variants else "; local: raw"), flush=True)
     finally:
@@ -517,7 +572,17 @@ def main(argv=None):
             swapper.close()
     append_mapping(mapping, rows)
     print(f"[segment] {len(rows)} segment(s); de-identified: {out}; raw (local only): {raw_root}; mapping: {mapping}")
+    if blocked:
+        print(f"[fill check] NOT SHAREABLE: fill export of {', '.join(blocked)} is marked Shareable false "
+              "(see UnmaskedFaceCheck in the fill sidecar)", flush=True)
+        if a.shareable:
+            return 3
     return 0
+
+
+def make_fill_guard(a):
+    """The fill fallback and unmasked-face check (src/fill_guard.py); replaced in tests."""
+    return G.FillGuard(a.yunet_model, score=a.yunet_score, pad=a.fallback_pad)
 
 
 if __name__ == "__main__":

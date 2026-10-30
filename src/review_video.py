@@ -314,7 +314,8 @@ def deid_export(video, eaf, mode, status, face_preprocess="none"):
         subprocess.Popen(cmd, cwd=str(Path(__file__).resolve().parents[1]), stdout=f, stderr=subprocess.STDOUT,
                          stdin=subprocess.DEVNULL)
     method = cmd[cmd.index("--deid-method") + 1]
-    return status + f"  |  de-ID export ({method}) started, log {log.name}"
+    chk = "; fill check result (shareable or not, unmasked frames) in the log" if method == "fill" else ""
+    return status + f"  |  de-ID export ({method}) started, log {log.name}{chk}"
 
 
 # ── processing ───────────────────────────────────────────────

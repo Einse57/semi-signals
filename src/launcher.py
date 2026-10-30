@@ -550,11 +550,14 @@ class Launcher:
                         self.prog.configure(value=100)
                         self.prog_text.set("Step 1 of 2: already processed")
                     low = val.lower()
-                    self.write(val, "err" if ("error" in low or "traceback" in low or "failed" in low) else None)
+                    self.write(val, "err" if ("error" in low or "traceback" in low or "failed" in low
+                                              or "not shareable" in low) else None)
                 elif kind == "done":
                     name, rc = val
-                    self.write(f"[{name} finished]\n" if rc == 0 else f"[{name} exited with code {rc}]\n",
-                               None if rc == 0 else "err")
+                    self.write(f"[{name} finished]\n" if rc == 0 else
+                               "[export finished, NOT SHAREABLE: a face was still found in the fill output; see "
+                               "the frame list above]\n" if (name == "export" and rc == 3) else
+                               f"[{name} exited with code {rc}]\n", None if rc == 0 else "err")
                     self.btns["stop"].configure(state="disabled")
                     self.prog_text.set(f"{name} finished" if rc == 0 else f"{name} stopped (code {rc})")
                     self.refresh()

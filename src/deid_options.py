@@ -84,7 +84,8 @@ def label_text(method: str) -> str:
     if method == ORIGINAL:
         return s
     if method == "fill":
-        return s + ": the only method that may be exported for sharing"
+        return (s + ": the only method that may be exported for sharing; every fill export is checked with YuNet "
+                "and is not marked shareable if a face is still found in any frame")
     return s + "; research use only: output stays on this computer, never shared"
 
 
@@ -106,6 +107,13 @@ def missing_weights_message(method: str, problems=()) -> str:
 def face_model_problems(models_dir: Path | None = None) -> list[str]:
     p = Path(models_dir or ROOT / "models") / "face_landmarker.task"
     return [] if p.exists() else [f"{p} not found"]
+
+
+def fill_check_problems(models_dir: Path | None = None) -> list[str]:
+    """[] when the YuNet model for the fill fallback and unmasked-face check is present."""
+    from src import fill_guard as G
+    p = Path(models_dir or ROOT / "models") / G.MODEL_NAME
+    return [] if p.exists() else [G.missing_message(p)]
 
 
 def swap_overrides(method: str, research_ack: bool) -> dict:
