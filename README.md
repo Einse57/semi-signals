@@ -188,7 +188,8 @@ Face methods ([docs/FACE_DEID_TRADEOFF.md](docs/FACE_DEID_TRADEOFF.md)):
 
 - **Fill** (shareable default): faces painted one flat colour, with a YuNet box fallback for faces the
   landmarker misses. YuNet then checks every output frame, fills any face it finds and checks again, then
-  checks the written video once more; a face still found marks the export not shareable and lists the frames.
+  checks the written video once more and re-fills flagged frames (up to two passes); a face still found in the
+  final file marks the export not shareable and lists the frames.
 - **GHOST** face swap: reduced risk, not de-identified; research use only, behind an acknowledgement.
 - **Blur** (`--deid blur`): local review only. Mosaic16 is not de-identifying.
 

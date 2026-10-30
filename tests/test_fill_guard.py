@@ -255,4 +255,61 @@ def test_export_blocked_when_encoded_file_shows_a_face(tmp_path, monkeypatch, ca
     assert c["UnmaskedFrames"] == [] and c["EncodedOutputCheck"]["UnmaskedFrames"] == list(range(8))
     assert c["EncodedOutputCheck"]["FramesChecked"] == 8 and "encoded fill video" in j["ShareableBlockedReason"]
     out = capsys.readouterr().out
-    assert "encoded file re-check: 8 frames, 8 flagged" in out and "NOT SHAREABLE" in out
+    rf = c["EncodedRefill"]                                           # a face that never goes away: bounded passes
+    assert rf["Passes"] == rf["MaxPasses"] == len(G.REFILL_PADS) and rf["RefilledFrames"] == list(range(8))
+    assert rf["FirstCheckUnmaskedFrames"] == list(range(8)) and [r["BoxPad"] for r in rf["PerPass"]] == list(G.REFILL_PADS)
+    assert "re-filled 8 frame(s) in 2 pass(es), final check: 8 frames, 8 flagged" in out and "NOT SHAREABLE" in out
+
+
+class _LateTextured(_Textured):
+    """Mock YuNet that misses the face before encoding and finds it (while unfilled) in the written file."""
+    on = False
+
+    def detect(self, frame):
+        return super().detect(frame) if self.on else []
+
+
+def _late_guard(monkeypatch, det):
+    g = G.FillGuard(detector=det)
+    orig = g.check_encoded
+
+    def late(path, expected=None):
+        det.on = True
+        return orig(path, expected)
+    monkeypatch.setattr(g, "check_encoded", late)
+    return g
+
+
+def test_refill_boxes_unit():
+    g = G.FillGuard(detector=_Fixed([]))
+    g.encoded_rows = {3: ([_row(10, 10, 20, 20)], (100, 100, 3)), 5: ([_row(90, 90, 20, 20)], (100, 100, 3))}
+    assert g.refill_boxes(1) == {3: [(4, 4, 36, 36)], 5: [(84, 84, 100, 100)]}
+    assert g.refills == [dict(Pass=1, BoxPad=G.REFILL_PADS[0], Frames=[3, 5], BoxesFilled=2)]
+    assert g.refill_boxes(2)[3] == [(0, 0, 40, 40)]
+
+
+def test_refill_makes_encoded_file_clean(tmp_path, monkeypatch, capsys):
+    _clip(tmp_path)
+    g = _late_guard(monkeypatch, _LateTextured([(100, 30, 40, 40)]))
+    monkeypatch.setattr(X, "make_preprocessor", lambda a: (_Est(), _Pre(_ring(40, 48)), None, None))
+    monkeypatch.setattr(X, "make_fill_guard", lambda a: g)
+    rc = X.main(["--input", str(tmp_path / "v.mp4"), "--whole", "--out", str(tmp_path / "o"), "--raw-root",
+                 str(tmp_path / "r"), "--deid", "fill", "--no-bystanders", "--shareable"])
+    vid = next((tmp_path / "o").rglob("*desc-fill_video.mp4"))
+    j = S.read_json(vid.with_suffix(".json"))
+    c = j["UnmaskedFaceCheck"]
+    rf = c["EncodedRefill"]
+    assert rc == 0 and j["Shareable"] is True and c["Clean"] and c["EncodedOutputCheck"]["UnmaskedFrames"] == []
+    assert rf["FirstCheckUnmaskedFrames"] == list(range(8)) and rf["Passes"] == 1 and rf["RefilledFrames"] == list(range(8))
+    assert not list(vid.parent.glob("*.refill.*"))
+    cap = cv2.VideoCapture(str(vid))
+    n, ok = 0, True
+    while True:
+        ok, f = cap.read()
+        if not ok:
+            break
+        n += 1
+        assert f[30:70, 100:140].reshape(-1, 3).std(0).max() <= 8      # face box painted flat
+    assert n == 8
+    out = capsys.readouterr().out
+    assert "re-filled 8 frame(s) in 1 pass(es), final check: 8 frames, 0 flagged" in out and "shareable" in out

@@ -39,6 +39,7 @@ from __future__ import annotations
 import argparse
 import csv
 import datetime as _dt
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -356,6 +357,30 @@ def writer(path, fps, size):
     return cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), fps, size)
 
 
+def refill_fill_video(cap, f0, n_frames, path, fps, size, renders, guard, missing):
+    """Re-fill passes after the encoded-file check: add the flagged boxes (src/fill_guard.py refill_boxes) to
+    the flagged frames, render the fill video again from the input and check the written file again."""
+    for p in range(1, len(G.REFILL_PADS) + 1):
+        enc = guard.encoded
+        if enc is None or enc["Clean"] or not enc["UnmaskedFrames"] or enc["FramesChecked"] != n_frames:
+            return
+        for i, bx in guard.refill_boxes(p).items():
+            if i < len(renders):
+                renders[i][2].extend(bx)
+        tmp = path.with_name(path.stem + ".refill" + path.suffix)
+        w = writer(tmp, fps, size)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, f0)
+        for i in range(n_frames):
+            ok, frame = cap.read()
+            if not ok:
+                break
+            lm, oth, bx = renders[i]
+            w.write(mask_faces(frame, lm, missing, others=oth or [], style="fill", boxes=bx))
+        w.release()
+        os.replace(tmp, path)
+        guard.check_encoded(path, n_frames)
+
+
 def resolve_variants(a):
     """(variants, swap overrides) from --deid or --deid-method, with the UI rules checked again here
     (src/deid_options.validate_request): known method, research-use acknowledgement, shareable only for fill,
@@ -465,6 +490,7 @@ def main(argv=None):
             for v in local_variants:
                 ws[v] = writer(R.video(v), fps, (W, H))
             T, LM, BS, SC, ROLL, n_other = [], [], [], [], [], []
+            renders = []                                         # fill inputs per frame, for re-fill passes
             for fi in range(f0, f1):
                 ok, frame = cap.read()
                 if not ok:
@@ -489,8 +515,10 @@ def main(argv=None):
                         faces = [] if whole else ([lm] if lm is not None else []) + list(oth or [])
                         bx = [] if whole else guard.boxes(frame, landmark_mask(frame.shape, faces))
                         o = mask_faces(frame, lm, a.missing_face, others=oth or [], style=v, boxes=bx)
-                        o, _ = guard.check_fix(o, fi - f0, lambda b2, bx=bx: mask_faces(
-                            frame, lm, a.missing_face, others=oth or [], style=v, boxes=bx + b2))
+                        used = list(bx)
+                        o, _ = guard.check_fix(o, fi - f0, lambda b2, bx=bx, used=used: (used.extend(b2), mask_faces(
+                            frame, lm, a.missing_face, others=oth or [], style=v, boxes=bx + b2))[1])
+                        renders.append((lm, oth, used))
                         ws[v].write(o)
                     else:
                         ws[v].write(mask_faces(frame, lm, a.missing_face, others=oth or [], style=v))
@@ -503,7 +531,9 @@ def main(argv=None):
             for w_ in ws.values():
                 w_.release()
             if guard is not None and guard.available:          # check the file as written (after MP4 encoding)
-                guard.check_encoded((R if "fill" in local_variants else P).video("fill"), len(T))
+                fill_path = (R if "fill" in local_variants else P).video("fill")
+                guard.check_encoded(fill_path, len(T))
+                refill_fill_video(cap, f0, len(T), fill_path, fps, (W, H), renders, guard, a.missing_face)
             found = int(np.isfinite(SC).sum())
             common = dict(Deidentified=True, AnnotationMode=",".join(sorted({e["mode"] for e in seg["events"]})) or "none",
                           FacePreprocess=a.face_preprocess, FaceLandmarker=lmk, PrivateMappingRef=mapping.name,
@@ -513,7 +543,7 @@ def main(argv=None):
             miss = ("; frames without the subject's face masked whole" if a.missing_face == "frame"
                     else "; frames without the subject's face NOT masked")
             fb = ("; faces YuNet found outside those areas filled as padded boxes; every output frame checked with "
-                  "YuNet, before and after encoding (UnmaskedFaceCheck)" if guard is not None and guard.available else
+                  "YuNet, before and after encoding, flagged frames re-filled (UnmaskedFaceCheck)" if guard is not None and guard.available else
                   "; YuNet not available: no fallback boxes and no unmasked-face check")
             descs = dict(fill="subject face area (landmark hull grown 25%)" + bys + " painted with its mean colour" + miss
                          + (fb if guard is not None else ""),

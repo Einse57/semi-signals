@@ -12,6 +12,9 @@
 4. Encoded file (check_encoded): after the fill video is written, it is decoded again and every frame is
    checked with the same detector and threshold, so MP4 compression cannot bring back a detectable face.
    The export is shareable only when both checks pass (UnmaskedFaceCheck.EncodedOutputCheck).
+5. Re-fill (refill_boxes): frames the encoded-file check flags get the flagged YuNet boxes filled, with a
+   wider margin each pass (REFILL_PADS), the video is written again and the whole file checked again, up to
+   len(REFILL_PADS) passes (UnmaskedFaceCheck.EncodedRefill). Only the final check of the written file counts.
 """
 from __future__ import annotations
 
@@ -23,6 +26,7 @@ MODEL_NAME = "face_detection_yunet_2023mar.onnx"
 FETCH_HINT = "python scripts/fetch_models.py --face-check --skip-data --skip-vsvig"
 DEFAULT_SCORE = 0.6                       # same as deid_check.YuNetDetector (used for the measurements)
 DEFAULT_PAD = 0.2
+REFILL_PADS = (0.3, 0.5)                  # margin per re-fill pass after the encoded-file check
 
 
 def missing_message(path) -> str:
@@ -75,7 +79,7 @@ class FillGuard:
     def reset(self):
         self.frames, self.unmasked, self.n_boxes, self.box_frames = 0, [], 0, 0
         self.first_pass, self.n_second, self.second_frames = [], 0, 0
-        self.encoded = None
+        self.encoded, self.encoded_rows, self.encoded_first, self.refills = None, {}, None, []
 
     def _faces(self, frame):
         return [r for r in self.det.detect(frame) if float(r[-1]) >= self.score]
@@ -128,14 +132,16 @@ class FillGuard:
                                 UnmaskedFrameCount=0, Clean=False, Reason=self.problem)
             return self.encoded
         import cv2
-        cap, n, bad = cv2.VideoCapture(str(path)), 0, []
+        cap, n, bad, rows = cv2.VideoCapture(str(path)), 0, [], {}
         try:
             while True:
                 ok, frame = cap.read()
                 if not ok:
                     break
-                if self._faces(frame):
+                found = self._faces(frame)
+                if found:
                     bad.append(n)
+                    rows[n] = (found, frame.shape)
                 n += 1
         finally:
             cap.release()
@@ -149,7 +155,23 @@ class FillGuard:
             reason = None
         self.encoded = dict(Ran=True, FramesChecked=n, ExpectedFrames=expected, UnmaskedFrames=bad,
                             UnmaskedFrameCount=len(bad), Clean=reason is None, Reason=reason)
+        self.encoded_rows = rows
+        if self.encoded_first is None:
+            self.encoded_first = list(bad)
         return self.encoded
+
+    def refill_boxes(self, pass_no) -> dict:
+        """Boxes to add for re-fill pass `pass_no` (1-based): {frame index: [(x0, y0, x1, y1), ...]} for every
+        frame the last encoded-file check flagged, each YuNet box padded by REFILL_PADS[pass_no - 1]."""
+        pad = REFILL_PADS[pass_no - 1]
+        out = {}
+        for i, (rows, shape) in sorted(self.encoded_rows.items()):
+            bx = [b for b in (pad_box(r, shape, pad) for r in rows) if b is not None]
+            if bx:
+                out[i] = bx
+        self.refills.append(dict(Pass=int(pass_no), BoxPad=pad, Frames=sorted(out),
+                                 BoxesFilled=sum(map(len, out.values()))))
+        return out
 
     def result(self) -> dict:
         ran = self.available
@@ -169,6 +191,11 @@ class FillGuard:
                     FirstPassUnmaskedFrames=list(self.first_pass), SecondPassBoxesFilled=self.n_second,
                     FramesWithSecondPassBoxes=self.second_frames,
                     EncodedOutputCheck=None if enc is None else dict(enc),
+                    EncodedRefill=None if enc is None else dict(
+                        FirstCheckUnmaskedFrames=list(self.encoded_first or []), Passes=len(self.refills),
+                        MaxPasses=len(REFILL_PADS),
+                        RefilledFrames=sorted({i for r in self.refills for i in r["Frames"]}),
+                        BoxesFilled=sum(r["BoxesFilled"] for r in self.refills), PerPass=[dict(r) for r in self.refills]),
                     Clean=clean,
                     Reason=None if clean else "; ".join(r for r in reasons if r))
 
@@ -182,7 +209,13 @@ class FillGuard:
              f"({r['SecondPassBoxesFilled']} box(es)); ")
         enc = r["EncodedOutputCheck"]
         if enc is not None:
-            s += f"encoded file re-check: {enc['FramesChecked']} frames, {enc['UnmaskedFrameCount']} flagged; "
+            rf = r["EncodedRefill"]
+            if rf["Passes"]:
+                s += (f"encoded file re-check: {len(rf['FirstCheckUnmaskedFrames'])} flagged, re-filled "
+                      f"{len(rf['RefilledFrames'])} frame(s) in {rf['Passes']} pass(es), final check: ")
+            else:
+                s += "encoded file re-check: "
+            s += f"{enc['FramesChecked']} frames, {enc['UnmaskedFrameCount']} flagged; "
         if r["Clean"]:
             return head + s + "no unmasked face: shareable"
 

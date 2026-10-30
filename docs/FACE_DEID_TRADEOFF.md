@@ -20,8 +20,9 @@ detection that no landmark mask covers, as a box padded 20 % per side. After fil
 frame; if it finds a face (score >= 0.6), the export is marked not shareable and the frame indices are listed
 in the sidecar (`UnmaskedFaceCheck`) and printed. A flagged frame first gets its flagged YuNet boxes filled
 (even inside a landmark hull) and is checked once more; only frames still flagged block sharing. The written
-video is then decoded and checked again with the same settings (`EncodedOutputCheck`); a face found there
-blocks sharing too. Without the YuNet model, fill runs on landmarks only and the
+video is then decoded and checked again with the same settings (`EncodedOutputCheck`). Frames flagged there
+get the flagged boxes filled with a wider margin (30 %, then 50 %), the video is written again and the whole
+file checked again, up to two passes (`EncodedRefill`); a face still found in the final file blocks sharing. Without the YuNet model, fill runs on landmarks only and the
 export can't be marked shareable (`python scripts/fetch_models.py --face-check`).
 
 ## Results
