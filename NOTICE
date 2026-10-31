@@ -29,9 +29,9 @@ Face de-identification numbers (docs/FACE_DEID_TRADEOFF.md) come from clips not 
   https://doi.org/10.5281/zenodo.3625687, CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/).
   Intel IoT DevKit sample videos, Intel Corporation, https://github.com/intel-iot-devkit/sample-videos,
   CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/).
-One figure is included: docs/figures/face_deid_grid_lwwy7p_fill_mosaic_blur.png, frames 20 and 45 of GRID
+One figure is included: docs/figures/face_deid_grid_lwwy7p_fill_blur.png, frames 20 and 45 of GRID
   clip lwwy7p (speaker s14), M. Cooke, J. Barker, S. Cunningham and X. Shao (2006), The GRID audio-visual
-  speech corpus, https://doi.org/10.5281/zenodo.3625687. Modified: face filled, pixelated or blurred, panels
+  speech corpus, https://doi.org/10.5281/zenodo.3625687. Modified: face filled or blurred, panels
   arranged and captioned. Licensed CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/), not MIT.
 Two README screenshots are included (docs/img/README.md):
   docs/img/live_detector_a.png, a frame of pat10/Sz2P from the WU-SAHZU-EMU-Video dataset (VSViG authors,

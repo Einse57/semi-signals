@@ -90,15 +90,13 @@ or ArcFace 0.30. `mosaic16` matched on 6 of 6 clips.
 | Intel head-pose-face-detection-female-and-male | mosaic16 | 92 % | 89 % (3074) | 93 % / 90 % (3074) | yes |
 | Intel head-pose-face-detection-female-and-male | gauss | 6.5 % | 8.5 % (117) | 7.7 % / 7.7 % (117) | no |
 
-## Figure 1: fill, mosaic and blur on a GRID frame
+## Figure 1: fill and blur on a GRID frame
 
-![Figure 1: GRID lwwy7p frames 20 and 45, left to right original, fill, mosaic 8 blocks, mosaic 16 blocks, Gaussian blur](figures/face_deid_grid_lwwy7p_fill_mosaic_blur.png)
+![Figure 1: GRID lwwy7p frames 20 and 45, left fill, right Gaussian blur](figures/face_deid_grid_lwwy7p_fill_blur.png)
 
 Top row frame 20, bottom row frame 45 of GRID clip `lwwy7p` (speaker s14); W = face box width (108 px).
-Left to right: original; **fill** (shareable default); **mosaic, 8 blocks** (W / 8 px blocks; reduced risk,
-not de-identified); **mosaic, 16 blocks** (W / 16 px blocks; not de-identifying); **Gaussian blur** (sigma
-W / 6; local review only).
+Left: **fill** (shareable default). Right: **Gaussian blur** (sigma W / 6; local review only).
 
 Credit: frames from the GRID audio-visual speech corpus, M. Cooke, J. Barker, S. Cunningham and X. Shao
 (2006), <https://doi.org/10.5281/zenodo.3625687>, CC BY 4.0 (<https://creativecommons.org/licenses/by/4.0/>).
-Modified (face filled, pixelated or blurred; panels arranged and captioned). The figure is CC BY 4.0, not MIT.
+Modified (face filled or blurred; panels arranged and captioned). The figure is CC BY 4.0, not MIT.

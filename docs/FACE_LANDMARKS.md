@@ -122,7 +122,6 @@ Recorded 2026-10-28 (150 timed frames after 10 warm-up frames, mean of the two r
 |---|---|---|---|---|---|---|
 | Linux VM, Intel Xeon, 8 vCPU | CPU, ONNX Runtime | 1280x720 test clip, face visible (160/160) | 7.6 | 7.9 | 10.8 ms | shared VM, load average 4 to 19 during the runs; run-to-run spread larger than the face cost |
 | Linux VM, Intel Xeon, 8 vCPU | CPU, ONNX Runtime | WU-SAHZU-EMU pat10 Sz2P from 20 s, faces pixelated (0/160) | 17.8 | 17.5 | 2.8 ms | same as above; hands not detected in this segment |
-| Core Ultra 9 285H | CPU / Arc 140T iGPU | | pending | pending | | to be recorded in a desktop-session scheduled task |
 
 ## Model card and licence notes
 
