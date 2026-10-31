@@ -18,8 +18,10 @@ from src.display import (
     draw_angles_overlay,
     draw_hand_skeleton,
     draw_region_chart,
+    draw_face_mesh,
     draw_skeleton,
 )
+from src.textdraw import put_block
 
 
 def parse_args() -> argparse.Namespace:
@@ -39,6 +41,17 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--kpt-score", type=float, default=0.3)
     p.add_argument("--no-hands", action="store_true",
                    help="Disable hand/finger tracking (faster, wrist-only)")
+    p.add_argument("--face", action="store_true",
+                   help="Start with face tracking on (MediaPipe Face Landmarker on a head crop; key 'm')")
+    p.add_argument("--no-face-mesh", action="store_true",
+                   help="With face tracking: draw contours only, no mesh")
+    p.add_argument("--face-preprocess", default="none", choices=["none", "detect", "coco-head"],
+                   help="none = the frame is the face region (default); detect = find, crop and align; "
+                        "coco-head = crop from the body head keypoints")
+    p.add_argument("--face-model", default=None,
+                   help="face_landmarker.task (default models/face_landmarker.task)")
+    from src.face_estimator import add_face_backend_args
+    add_face_backend_args(p)
     return p.parse_args()
 
 
@@ -107,7 +120,12 @@ def main() -> None:
         hand_est.estimate(dummy, dummy_kpts, dummy_scores)
     status = "ON" if hands_enabled else "OFF"
     print(f"[INFO] Models warmed up. Hands: {status}.")
-    print("[INFO] Keys: 'q' quit | 'h' toggle hands | 'c' cycle camera")
+    print("[INFO] Keys: 'q' quit | 'h' toggle hands | 'm' toggle face | 'c' cycle camera")
+    from src.face_estimator import FaceMotion, FaceStage
+    from src.config import FACE_CHART_GROUPS
+    face = FaceStage(args.face_model, on=args.face, preprocess=args.face_preprocess,
+                     backend=args.face_backend, device=args.face_device)    # model loads on first enable
+    face_mot = FaceMotion()
 
     frame_idx = 0
     cached_bboxes: list[np.ndarray] = []
@@ -138,6 +156,11 @@ def main() -> None:
                 hand_results = hand_est.estimate(frame, kpts, kpt_scores)
             metrics = motion_q.update(kpts, scores=kpt_scores,
                                        hand_results=hand_results)
+            if face.on:
+                fr = face.run(frame, kpts, kpt_scores, best["bbox"])
+                face_lm = fr["landmarks"] if fr is not None else None
+                face_mot.update(time.monotonic(), face_lm)
+                draw_face_mesh(frame, face_lm, mesh=not args.no_face_mesh)
 
             draw_skeleton(frame, kpts, kpt_scores, score_thr=args.kpt_score)
             if hand_results is not None:
@@ -152,15 +175,19 @@ def main() -> None:
         fps_t0 = now
         if dt > 0:
             fps_val = 0.8 * fps_val + 0.2 * (1.0 / dt)  # smoothed
-        hand_label = "Hands: ON" if hands_enabled else "Hands: OFF"
-        cv2.putText(frame, f"FPS: {fps_val:.1f}  {hand_label}",
-                    (frame.shape[1] - 280, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        mode = "Body" + (" + Hands" if hands_enabled else "") + (" + Face" if face.on else "")
+        lines = [(f"FPS: {fps_val:.1f}", (0, 255, 0)), (f"Mode: {mode}", (0, 220, 255))]
+        if face.error and not face.on:
+            lines.append((f"Face unavailable: {face.error}", (0, 0, 255)))
+        put_block(frame, lines, (12, 10), max(16, frame.shape[0] // 30))
 
         # 5. Compose and show
         chart_img = draw_region_chart(motion_q.region_intensity_history,
                                        chart_h=350,
                                        timestamps=motion_q.timestamps)
+        if face.on:
+            chart_img = np.vstack([chart_img, draw_region_chart(
+                face_mot.speeds, chart_h=200, timestamps=face_mot.t, groups=FACE_CHART_GROUPS)])
         display = compose_display(frame, chart_img)
         cv2.imshow("Semi-Signals | Stage 1", display)
 
@@ -178,6 +205,10 @@ def main() -> None:
                                   dummy_kpts, dummy_scores)
             motion_q.reset_hands()
             print(f"[INFO] Hand tracking: {'ON' if hands_enabled else 'OFF'}")
+        if key == ord("m"):
+            face.toggle()
+            face_mot._prev = None
+            print(f"[INFO] Face tracking: {'ON' if face.on else 'OFF'}")
         if key == ord("c") and not is_video_file:
             # Cycle to next available camera
             cap.release()
@@ -204,6 +235,7 @@ def main() -> None:
 
     cap.release()
     cv2.destroyAllWindows()
+    face.close()
 
 
 if __name__ == "__main__":

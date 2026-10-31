@@ -1,0 +1,115 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<ANNOTATION_DOCUMENT xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" AUTHOR="XX" DATE="2026-10-28T16:53:13-07:00" FORMAT="3.0" VERSION="3.0" xsi:noNamespaceSchemaLocation="http://www.mpi.nl/tools/elan/EAFv3.0.xsd">
+  <HEADER MEDIA_FILE="" TIME_UNITS="milliseconds">
+    <MEDIA_DESCRIPTOR MEDIA_URL="file:///tmp/semi_signals_fixture/clip.mp4" MIME_TYPE="video/mp4" RELATIVE_MEDIA_URL="./clip.mp4" />
+    <LINKED_FILE_DESCRIPTOR LINK_URL="file:///tmp/semi_signals_fixture/clip_signals.csv" RELATIVE_LINK_URL="./clip_signals.csv" MIME_TYPE="text/plain" TIME_ORIGIN="0" ASSOCIATED_WITH="file:///tmp/semi_signals_fixture/clip.mp4" />
+    <LINKED_FILE_DESCRIPTOR LINK_URL="file:///tmp/semi_signals_fixture/clip_tsconf.xml" RELATIVE_LINK_URL="./clip_tsconf.xml" MIME_TYPE="text/xml" />
+    <PROPERTY NAME="URN">urn:nl-mpi-tools-elan-eaf:cc438757-1850-435f-976e-656908c5c9ce</PROPERTY>
+    <PROPERTY NAME="semisignals_schema">semi-signals.annotation/1</PROPERTY>
+    <PROPERTY NAME="video_sha256">edd35b131a769f440e07fed9acabf102fc7840aad1de9c2e1aef1c95dfe9fd0f</PROPERTY>
+    <PROPERTY NAME="video_fps">25</PROPERTY>
+    <PROPERTY NAME="annotator">XX</PROPERTY>
+    <PROPERTY NAME="pat_id">p00</PROPERTY>
+    <PROPERTY NAME="consent">public</PROPERTY>
+    <PROPERTY NAME="research_demo_not_diagnostic">true</PROPERTY>
+    <PROPERTY NAME="model_id">detector_a_all</PROPERTY>
+    <PROPERTY NAME="model_threshold">0.95</PROPERTY>
+    <PROPERTY NAME="alarm_rule">smooth 5 s; alarm when &gt;= threshold for &gt;= 3 s; merge alarms &lt; 30 s apart</PROPERTY>
+    <PROPERTY NAME="lastUsedAnnotationId">9</PROPERTY>
+  </HEADER>
+  <TIME_ORDER>
+    <TIME_SLOT TIME_SLOT_ID="ts1" TIME_VALUE="5000" />
+    <TIME_SLOT TIME_SLOT_ID="ts2" TIME_VALUE="20500" />
+    <TIME_SLOT TIME_SLOT_ID="ts3" TIME_VALUE="3200" />
+    <TIME_SLOT TIME_SLOT_ID="ts4" TIME_VALUE="3240" />
+    <TIME_SLOT TIME_SLOT_ID="ts5" TIME_VALUE="5000" />
+    <TIME_SLOT TIME_SLOT_ID="ts6" TIME_VALUE="20500" />
+    <TIME_SLOT TIME_SLOT_ID="ts7" TIME_VALUE="40000" />
+    <TIME_SLOT TIME_SLOT_ID="ts8" TIME_VALUE="40040" />
+    <TIME_SLOT TIME_SLOT_ID="ts9" TIME_VALUE="30000" />
+    <TIME_SLOT TIME_SLOT_ID="ts10" TIME_VALUE="31000" />
+    <TIME_SLOT TIME_SLOT_ID="ts11" TIME_VALUE="50000" />
+    <TIME_SLOT TIME_SLOT_ID="ts12" TIME_VALUE="55000" />
+    <TIME_SLOT TIME_SLOT_ID="ts13" TIME_VALUE="6000" />
+    <TIME_SLOT TIME_SLOT_ID="ts14" TIME_VALUE="12000" />
+  </TIME_ORDER>
+  <TIER TIER_ID="Seizure" LINGUISTIC_TYPE_REF="seizure_event" ANNOTATOR="XX" PARTICIPANT="p00">
+    <ANNOTATION>
+      <ALIGNABLE_ANNOTATION ANNOTATION_ID="a1" TIME_SLOT_REF1="ts1" TIME_SLOT_REF2="ts2">
+        <ANNOTATION_VALUE>seizure</ANNOTATION_VALUE>
+      </ALIGNABLE_ANNOTATION>
+    </ANNOTATION>
+    <ANNOTATION>
+      <ALIGNABLE_ANNOTATION ANNOTATION_ID="a5" TIME_SLOT_REF1="ts7" TIME_SLOT_REF2="ts8">
+        <ANNOTATION_VALUE>possible_seizure</ANNOTATION_VALUE>
+      </ALIGNABLE_ANNOTATION>
+    </ANNOTATION>
+  </TIER>
+  <TIER TIER_ID="ILAE2017_type" LINGUISTIC_TYPE_REF="symbolic" PARENT_REF="Seizure" ANNOTATOR="XX" PARTICIPANT="p00">
+    <ANNOTATION>
+      <REF_ANNOTATION ANNOTATION_ID="a2" ANNOTATION_REF="a1">
+        <ANNOTATION_VALUE>focal aware motor</ANNOTATION_VALUE>
+      </REF_ANNOTATION>
+    </ANNOTATION>
+  </TIER>
+  <TIER TIER_ID="EEG_onset" LINGUISTIC_TYPE_REF="default" ANNOTATOR="XX" PARTICIPANT="p00">
+    <ANNOTATION>
+      <ALIGNABLE_ANNOTATION ANNOTATION_ID="a3" TIME_SLOT_REF1="ts3" TIME_SLOT_REF2="ts4">
+        <ANNOTATION_VALUE>sz01</ANNOTATION_VALUE>
+      </ALIGNABLE_ANNOTATION>
+    </ANNOTATION>
+  </TIER>
+  <TIER TIER_ID="Notes" LINGUISTIC_TYPE_REF="default" ANNOTATOR="XX" PARTICIPANT="p00">
+    <ANNOTATION>
+      <ALIGNABLE_ANNOTATION ANNOTATION_ID="a4" TIME_SLOT_REF1="ts5" TIME_SLOT_REF2="ts6">
+        <ANNOTATION_VALUE>left arm</ANNOTATION_VALUE>
+      </ALIGNABLE_ANNOTATION>
+    </ANNOTATION>
+    <ANNOTATION>
+      <ALIGNABLE_ANNOTATION ANNOTATION_ID="a6" TIME_SLOT_REF1="ts9" TIME_SLOT_REF2="ts10">
+        <ANNOTATION_VALUE>nurse in view</ANNOTATION_VALUE>
+      </ALIGNABLE_ANNOTATION>
+    </ANNOTATION>
+  </TIER>
+  <TIER TIER_ID="Exclude" LINGUISTIC_TYPE_REF="default" ANNOTATOR="XX" PARTICIPANT="p00">
+    <ANNOTATION>
+      <ALIGNABLE_ANNOTATION ANNOTATION_ID="a7" TIME_SLOT_REF1="ts11" TIME_SLOT_REF2="ts12">
+        <ANNOTATION_VALUE>other</ANNOTATION_VALUE>
+      </ALIGNABLE_ANNOTATION>
+    </ANNOTATION>
+  </TIER>
+  <TIER TIER_ID="Model_alarm" LINGUISTIC_TYPE_REF="default" PARTICIPANT="p00">
+    <ANNOTATION>
+      <ALIGNABLE_ANNOTATION ANNOTATION_ID="a8" TIME_SLOT_REF1="ts13" TIME_SLOT_REF2="ts14">
+        <ANNOTATION_VALUE>0.98</ANNOTATION_VALUE>
+      </ALIGNABLE_ANNOTATION>
+    </ANNOTATION>
+  </TIER>
+  <TIER TIER_ID="Model_drivers" LINGUISTIC_TYPE_REF="symbolic" PARENT_REF="Model_alarm" PARTICIPANT="p00">
+    <ANNOTATION>
+      <REF_ANNOTATION ANNOTATION_ID="a9" ANNOTATION_REF="a8">
+        <ANNOTATION_VALUE>left arm</ANNOTATION_VALUE>
+      </REF_ANNOTATION>
+    </ANNOTATION>
+  </TIER>
+  <LINGUISTIC_TYPE LINGUISTIC_TYPE_ID="default" TIME_ALIGNABLE="true" GRAPHIC_REFERENCES="false" />
+  <LINGUISTIC_TYPE LINGUISTIC_TYPE_ID="seizure_event" TIME_ALIGNABLE="true" GRAPHIC_REFERENCES="false" CONTROLLED_VOCABULARY_REF="seizure_event" />
+  <LINGUISTIC_TYPE LINGUISTIC_TYPE_ID="symbolic" TIME_ALIGNABLE="false" CONSTRAINTS="Symbolic_Association" GRAPHIC_REFERENCES="false" />
+  <LANGUAGE LANG_ID="eng" LANG_DEF="http://cdb.iso.org/lg/CDB-00138502-001" LANG_LABEL="English (eng)" />
+  <CONSTRAINT STEREOTYPE="Time_Subdivision" DESCRIPTION="Time subdivision of parent annotation's time interval, no time gaps allowed within this interval" />
+  <CONSTRAINT STEREOTYPE="Symbolic_Subdivision" DESCRIPTION="Symbolic subdivision of a parent annotation. Annotations refering to the same parent are ordered" />
+  <CONSTRAINT STEREOTYPE="Symbolic_Association" DESCRIPTION="1-1 association with a parent annotation" />
+  <CONSTRAINT STEREOTYPE="Included_In" DESCRIPTION="Time alignable annotations within the parent annotation's time interval, gaps are allowed" />
+  <CONTROLLED_VOCABULARY CV_ID="seizure_event">
+    <DESCRIPTION LANG_REF="eng">Clinical event class (onset to end)</DESCRIPTION>
+    <CV_ENTRY_ML CVE_ID="cveid_seizure">
+      <CVE_VALUE LANG_REF="eng">seizure</CVE_VALUE>
+    </CV_ENTRY_ML>
+    <CV_ENTRY_ML CVE_ID="cveid_possible_seizure">
+      <CVE_VALUE LANG_REF="eng">possible_seizure</CVE_VALUE>
+    </CV_ENTRY_ML>
+    <CV_ENTRY_ML CVE_ID="cveid_non_epileptic_event">
+      <CVE_VALUE LANG_REF="eng">non_epileptic_event</CVE_VALUE>
+    </CV_ENTRY_ML>
+  </CONTROLLED_VOCABULARY>
+</ANNOTATION_DOCUMENT>

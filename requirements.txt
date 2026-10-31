@@ -11,6 +11,7 @@ timm>=0.9.0
 # Pose estimation inference (ONNX, no mmcv/mmdet needed)
 rtmlib>=0.0.15
 onnxruntime>=1.17.0
+onnx>=1.15
 
 # Intel acceleration (optional – for OpenVINO EP in onnxruntime)
 openvino>=2024.0.0
@@ -28,3 +29,4 @@ matplotlib>=3.7.0
 
 # Utilities
 tqdm>=4.65.0
+# mediapipe>=0.10.14  # optional: face landmarks (--face); pip install mediapipe

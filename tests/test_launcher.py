@@ -38,6 +38,10 @@ def test_commands_parse_in_the_tools(tmp_path):
     assert r.annotator == "AL" and r.pat_id == "p10" and r.consent == "public" and r.headless_process
     assert review_video.parse_args(L.annotate_cmd(own, d, m)[4:]).consent == "self"
     assert "--skip-vsvig" in L.fetch_cmd(d, m, vsvig=False) and "--skip-vsvig" not in L.fetch_cmd(d, m, vsvig=True)
+    assert not a.face and "--face" not in v                                       # face is opt-in
+    assert run_seizure_demo.parse_args(L.viewer_cmd(dict(s, face=True), d, m)[4:]).face
+    assert {"--face", "--face-check"} <= set(L.fetch_cmd(d, m, vsvig=False, face=True))
+    assert not {"--face", "--face-check"} & set(L.fetch_cmd(d, m, vsvig=False))
 
 
 def test_settings_roundtrip_and_proxy(tmp_path):

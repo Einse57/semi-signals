@@ -11,15 +11,20 @@ Optional: per-second iEEG probabilities from a CSV (columns t,p) replayed alongs
 fused with noisy-OR. Such replays are UNPAIRED (different patients) unless stated.
 
 Layout: video on the left; on the right a panel with the smoothed Detector A probability
-(dashed alarm threshold, shaded alarm seconds, current value), the top drivers of the score
+(dashed score threshold, shaded flagged seconds, current value), the top drivers of the score
 (LightGBM pred_contrib once per second, grouped by body region and feature family, averaged
 over 5 s), plain per-region motion graphs, and a greyed-out
 EEG lane reserved for a future paired EEG stream.
 
 Keys: q quit, space pause, f fast-forward toggle (no real-time pacing), r replay from the start,
-o open another video (file picker), h show/hide the key legend (footer strip). When the video ends the window stays open on the last frame
+o open another video (file picker), m face tracking on/off, h show/hide the key legend (footer strip). When the video ends the window stays open on the last frame
 (graphs and score strip visible): r replay, o open another video, q quit. --loop restarts by itself.
-A replay resets all causal state (buffers, smoothing, alarms, explanations, graphs).
+A replay resets all causal state (buffers, smoothing, flagged segments, explanations, graphs).
+
+Optional face stage (--face, or the m key at run time; off by default): MediaPipe Face Landmarker on
+a head crop of the tracked subject (src/face_estimator.py). It adds the face mesh to the video and
+face motion graphs (mouth, eyes, left/right face) to the panel. It does not change Detector A or
+Detector B inputs. The model loads the first time face tracking is switched on.
 """
 from __future__ import annotations
 
@@ -40,7 +45,7 @@ WIN_S = 12.0          # seconds of keypoint history kept for features
 CHART_S = 90.0        # seconds shown on the chart
 WIN_NAME = "semi-signals | seizure detection"
 MIN_VALID_B = 0.5    # Detector B needs the tracked subject in at least half of its 5 s window, else no score
-RENDER_VERSION = 2   # bump when the rendered overlay changes, so saved renders are redone (review_video)
+RENDER_VERSION = 3   # bump when the rendered overlay changes, so saved renders are redone (review_video)
 
 
 def parse_args(argv=None):
@@ -71,6 +76,15 @@ def parse_args(argv=None):
     p.add_argument("--max-loops", type=int, default=0, help="with --loop: stop after this many passes (0 = no limit)")
     p.add_argument("--exit-at-end", action="store_true", help="close the window when the video ends")
     p.add_argument("--end-frame", default=None, help="write the frozen last frame with the end-of-video overlay to this png")
+    p.add_argument("--face", action="store_true",
+                   help="start with face tracking on (MediaPipe Face Landmarker; toggle with m)")
+    p.add_argument("--no-face-mesh", action="store_true", help="with face tracking: draw contours only, no mesh")
+    p.add_argument("--face-model", default=None, help="face_landmarker.task (default models/face_landmarker.task)")
+    p.add_argument("--face-preprocess", default="none", choices=["none", "detect", "coco-head"],
+                   help="where the face landmarker looks: none = the frame is the face region (default); "
+                        "detect = find, crop and align the face; coco-head = crop from the body head keypoints")
+    from src.face_estimator import add_face_backend_args
+    add_face_backend_args(p)
     return p.parse_args(argv)
 
 
@@ -146,13 +160,11 @@ def draw_chart(w, h, now, series, thr, marks, alarm, span=CHART_S):
         cv2.putText(img, name, (lx, h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, col, 1)
         lx += 18 + 9 * len(name)
     cv2.putText(img, f"t = {t_disp:6.1f} s", (w - 130, h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
-    if alarm:
-        cv2.rectangle(img, (0, 0), (w - 1, h - 1), (0, 0, 255), 4)
     return img
 
 
 class CausalScorer:
-    """All per-pass causal state: keypoint buffers, Detector A history and smoothing, alarm state,
+    """All per-pass causal state: keypoint buffers, Detector A history and smoothing, flagged-segment state,
     explanation history and the motion-graph series. reset() returns it to the state of a fresh
     start, so a replay of the same video gives identical scores."""
 
@@ -241,9 +253,13 @@ END_TEXT = "End of video:  R replay   O open another video   Q quit"
 
 
 VIEWER_KEYS = [("q", "quit"), ("space", "pause / play"), ("f", "fast / real time"), ("r", "replay"),
-               ("o", "open another video"), ("h", "hide keys")]
+               ("o", "open another video"), ("m", "face on/off"), ("h", "hide keys")]
 LEGEND_H = 34
-_legend = {"on": True}
+_legend = {"on": True, "mode": None}
+
+
+def mode_label(face_on: bool) -> str:
+    return "Mode: Body + Hands + Face" if face_on else "Mode: Body + Hands"
 
 
 def draw_legend(w, items, h=LEGEND_H, note=None):
@@ -278,6 +294,8 @@ def _legend_img(w, items, h, note):
 def with_legend(img, items=VIEWER_KEYS, note=None):
     if not _legend["on"]:
         return img
+    if _legend.get("mode"):
+        note = _legend["mode"] + (f"  |  {note}" if note else "")
     return np.vstack([img, draw_legend(img.shape[1], items, note=note)])
 
 
@@ -379,8 +397,11 @@ def main(argv=None):
         vs = VSViGModel(a.vsvig, device if device == "gpu" else "cpu")
         print(f"[demo] VSViG loaded on {vs.dev}")
     ieeg = load_ieeg(a.ieeg, a.ieeg_offset) if a.ieeg else None
+    from src.face_estimator import FaceStage
     scorer = CausalScorer(booster, thr_a, a.fps, fnames=fnames, explain=not a.no_explain, start=a.start)
-    models = dict(det=det, pose=pose, hand=hand, vs=vs, thr_a=thr_a, device=device, ieeg=ieeg, scorer=scorer)
+    models = dict(det=det, pose=pose, hand=hand, vs=vs, thr_a=thr_a, device=device, ieeg=ieeg, scorer=scorer,
+                  face=FaceStage(a.face_model, on=a.face, preprocess=a.face_preprocess,
+                                 backend=a.face_backend, device=a.face_device))   # model loads on first enable
 
     video, labels, n_pass = a.input, a.labels, 0
     first_video = str(Path(a.input).resolve())
@@ -411,6 +432,7 @@ def main(argv=None):
             print(f"[viewer] replay {n_pass + 1}")
     if not a.headless:
         cv2.destroyAllWindows()
+    models["face"].close()
 
 
 def end_screen(last, video):
@@ -443,6 +465,12 @@ def run_pass(a, M, video, labels, n_pass):
     from src import explain_view as ev
     from src.display import draw_skeleton, draw_hand_skeleton
     det, pose, hand, vs, thr_a, device, ieeg, sc = (M[k] for k in ("det", "pose", "hand", "vs", "thr_a", "device", "ieeg", "scorer"))
+    from src.face_estimator import FaceMotion, FaceStage
+    from src.display import draw_face_mesh
+    fst = M.get("face") or FaceStage()
+    fmot = FaceMotion()
+    face_lm = None
+    _legend["mode"] = mode_label(fst.on) + (f" (face unavailable: {fst.error})" if fst.error else "")
     sc.reset(start=a.start)
     hist = sc.hist
     explainer_on = sc.explainer is not None
@@ -535,6 +563,10 @@ def run_pass(a, M, video, labels, n_pass):
                 for j, side in enumerate(("left", "right")):
                     if hres[side] is not None:
                         hk[j], hs[j] = hres[side]["keypoints"], hres[side]["scores"]
+            if fst.on:              # optional face stage: subject only, never feeds Detector A/B
+                fr_ = fst.run(frame, bk[sel], bs[sel], bb[sel]) if sel >= 0 else fst.run(frame)
+                face_lm = fr_["landmarks"] if fr_ is not None else None
+                fmot.update(t, face_lm)
             if sel >= 0:
                 patch = extract_vsvig_patches(frame, bk[sel][VSVIG_COCO_ORDER])
                 vkp = np.concatenate([bk[sel][VSVIG_COCO_ORDER], bs[sel][VSVIG_COCO_ORDER, None]], -1)
@@ -573,6 +605,8 @@ def run_pass(a, M, video, labels, n_pass):
                     if hres.get(side) is not None:
                         hd_ = dict(hres[side]); hd_["keypoints"] = hd_["keypoints"] * sx
                         draw_hand_skeleton(vis, hd_, score_thr=0.3)
+            if fst.on and face_lm is not None:
+                draw_face_mesh(vis, face_lm * sx, mesh=not a.no_face_mesh)
             for r_ in hl_regions - {"overall"}:      # ring the joints of the driver regions
                 for j_ in REGIONS[r_]:
                     if sel_sc[j_] >= 0.3:
@@ -587,9 +621,9 @@ def run_pass(a, M, video, labels, n_pass):
             lines.append((f"Detector B (VSViG-base, reference): " + (f"{pb_:.2f}" if np.isfinite(pb_) else
                           ("-- (no subject tracked)" if hist["pB"] else "-- (warming up, 5 s)")),
                           (60, 60, 255) if alarm_b else (255, 200, 0)))
+        if fst.on:
+            lines.append((mode_label(True), (0, 220, 255)))
         overlay_lines(vis, lines, (12, 10), 20)
-        if alarm_a or alarm_b:
-            put_text(vis, "SEIZURE ALERT", (disp_w - 16, 14), 28, (0, 0, 255), bold=True, anchor="rt")
         if inf_times:
             overlay_lines(vis, [(f"analysis {1.0 / max(1e-3, np.mean(inf_times)):.0f} frames/s ({device})", (210, 210, 210))],
                           (12, disp_h - 30), 14, bold=False)
@@ -604,14 +638,19 @@ def run_pass(a, M, video, labels, n_pass):
             if lab:
                 marks = [("EEG onset", lab[0], (0, 255, 255)), ("clinical onset", lab[1], (0, 0, 255))]
             p_now = hist["pAs"][-1] if hist["pAs"] else np.nan
+            hm_b, hm_f = ev.split_motion(hm, fst.on)
+            face_strip = (ev.draw_motion(pan_w, hm_f, t, chart_span, fmot.t, fmot.speeds, set(), marks,
+                                         groups=ev.FACE_GROUPS, hdr=ev.FACE_HDR, colors=ev.FACE_COLORS)
+                          if fst.on else None)
             panel = ev.compose_panel(
                 pan_w, out_h,
                 ev.draw_prob_strip(pan_w, hp, t, chart_span, hist["tA"], hist["pA"], hist["pAs"], hist["alA"],
                                    thr_a, marks, extra, alarm_now=alarm_a),
                 ev.draw_drivers(pan_w, hd, drivers if explainer_on else [], p_now) if explainer_on
                 else np.full((hd, pan_w, 3), 30, np.uint8),
-                ev.draw_motion(pan_w, hm, t, chart_span, sc.mot_t, sc.mot, set(), marks),
-                ev.draw_eeg_lane(pan_w, he, enabled=False))   # hook: pass a paired EEG stream here later
+                ev.draw_motion(pan_w, hm_b, t, chart_span, sc.mot_t, sc.mot, set(), marks),
+                ev.draw_eeg_lane(pan_w, he, enabled=False),   # hook: pass a paired EEG stream here later
+                face=face_strip)
             new_data = False
         if disp_h < out_h:
             vis = np.vstack([vis, np.zeros((out_h - disp_h, disp_w, 3), np.uint8)])
@@ -634,6 +673,10 @@ def run_pass(a, M, video, labels, n_pass):
                 show(with_legend(out, note="paused"))
             if k == ord("h"):
                 _legend["on"] = not _legend["on"]
+            if k == ord("m"):
+                fst.toggle()
+                _legend["mode"] = mode_label(fst.on) + (f" (face unavailable: {fst.error})" if fst.error else "")
+                face_lm = None; fmot._prev = None; new_data = True   # no motion across an off gap
             if k == ord("f"):
                 fast = not fast; wall0 = time.perf_counter(); vid0 = t
             if k == ord("r"):

@@ -2,9 +2,11 @@
 
 Per video <stem>.<ext>, written next to it:
   <stem>.eaf              ELAN EAF 3.0 (ms). Human tiers: Seizure (+ ILAE2017_type child), EEG_onset,
-                          Notes, Exclude. Model tiers: Model_alarm (+ Model_drivers child).
+                          Notes, Exclude; with face events also Face_event (value = side) and,
+                          once labels/face.json has a term list, a Face_term child.
+                          Model tiers: Model_alarm (+ Model_drivers child).
                           Provenance in HEADER PROPERTY elements.
-  <stem>_signals.csv      per-second model probability, alarm state and region speeds
+  <stem>_signals.csv      per-second model probability, flagged state and region speeds
   <stem>_tsconf.xml       ELAN Timeseries Viewer track setup for the CSV
   <stem>.pfsx             ELAN per-document preferences: which tracks go in which viewer panel
                           (only written if absent; ELAN keeps the user's layout there)
@@ -30,6 +32,8 @@ from pathlib import Path
 SCHEMA = "semi-signals.annotation/1"
 EAF_XSD = "http://www.mpi.nl/tools/elan/EAFv3.0.xsd"
 HUMAN_TIERS = ("Seizure", "ILAE2017_type", "EEG_onset", "Notes", "Exclude")
+FACE_TIERS = ("Face_event", "Face_term")       # only written when there are face events
+EVENT_MODES = ("body", "face")                  # stored per event as "mode"; missing means body (older files)
 MODEL_TIERS = ("Model_alarm", "Model_drivers")
 SEIZURE_CV = ("seizure", "possible_seizure", "non_epileptic_event")
 # Pick list for the ILAE2017_type tier (ILAE 2017 operational classification, short forms).
@@ -75,9 +79,29 @@ def paths_for(video) -> dict:
                 tsconf=v.with_name(v.stem + "_tsconf.xml"), json=v.with_name(v.stem + ".annotation.json"))
 
 
+def event_mode(e: dict) -> str:
+    """Mode of one event: "body" (default, also for files written before modes existed) or "face"."""
+    return e.get("mode") or "body"
+
+
+def events_of(ann_or_events, mode: str) -> list[dict]:
+    ev = ann_or_events.get("events", []) if isinstance(ann_or_events, dict) else ann_or_events
+    return [e for e in ev if event_mode(e) == mode]
+
+
+def face_term_tier() -> str:
+    try:
+        from src import labels
+        return labels.load("face")["term"]["tier"] or "Face_term"
+    except Exception:          # a broken label file must not block saving timing marks
+        return "Face_term"
+
+
 def new_annotation(video, fps: float, duration_s: float, annotator: str = "", pat_id: str = "",
                    consent: str = "unknown", sha256: str | None = None) -> dict:
-    """events: list of {clinical_onset_s, clinical_end_s, eeg_onset_s, event_class, seizure_type, notes}"""
+    """events: list of dicts. Body: {mode: "body", clinical_onset_s, clinical_end_s, eeg_onset_s, event_class,
+    seizure_type, notes}. Face: {mode: "face", clinical_onset_s, clinical_end_s, eeg_onset_s, side
+    (L/R/both or None), face_term, notes}. Field sets come from labels/<mode>.json."""
     v = Path(video)
     return dict(schema=SCHEMA, video=dict(file=v.name, sha256=sha256 or sha256_file(v), fps=float(fps),
                                           duration_s=float(duration_s)),
@@ -86,7 +110,7 @@ def new_annotation(video, fps: float, duration_s: float, annotator: str = "", pa
 
 
 def model_section(model_id: str, threshold: float, alarms: list[dict], per_second: list[dict]) -> dict:
-    """alarms: [{start_s, end_s, peak_p, drivers}], per_second: rows for the signals CSV."""
+    """alarms: flagged segments [{start_s, end_s, peak_p, drivers}], per_second: rows for the signals CSV."""
     return dict(detector="A (pose features + LightGBM)", model_id=model_id, threshold=threshold,
                 alarm_rule="smooth 5 s; alarm when >= threshold for >= 3 s; merge alarms < 30 s apart",
                 alarms=alarms, per_second=per_second)
@@ -94,7 +118,7 @@ def model_section(model_id: str, threshold: float, alarms: list[dict], per_secon
 
 def alarms_from_seconds(rows: list[dict], merge_gap: float = 30.0) -> list[dict]:
     """rows: per-second dicts with t (second index), p_smooth, alarm (0/1), drivers (str).
-    Returns merged alarm spans (alarm seconds covering [t, t+1))."""
+    Returns merged flagged segments (flagged seconds covering [t, t+1))."""
     spans = []
     for r in rows:
         if not r.get("alarm"):
@@ -166,7 +190,7 @@ def write_eaf(ann: dict, video, out=None) -> Path:
     sz, ty = tier("Seizure", "seizure_event"), tier("ILAE2017_type", "symbolic", "Seizure")
     eeg, notes, excl = tier("EEG_onset", "default"), tier("Notes", "default"), tier("Exclude", "default")
     mal, mdr = tier("Model_alarm", "default", human=False), tier("Model_drivers", "symbolic", "Model_alarm", human=False)
-    for k, e in enumerate(sorted(ann.get("events", []), key=lambda e: e.get("clinical_onset_s") or 0.0), 1):
+    for k, e in enumerate(sorted(events_of(ann, "body"), key=lambda e: e.get("clinical_onset_s") or 0.0), 1):
         if e.get("clinical_onset_s") is None:
             continue
         end = e.get("clinical_end_s")
@@ -178,6 +202,22 @@ def write_eaf(ann: dict, video, out=None) -> Path:
             span(eeg, e["eeg_onset_s"], e["eeg_onset_s"] + 0.04, f"sz{k:02d}")
         if e.get("notes"):
             span(notes, e["clinical_onset_s"], end, e["notes"])
+    face_ev = sorted(events_of(ann, "face"), key=lambda e: e.get("clinical_onset_s") or 0.0)
+    if face_ev:       # face tiers only when needed, so body-only files stay as before
+        fe = tier("Face_event", "default")
+        fterm = tier(face_term_tier(), "symbolic", "Face_event") if any(e.get("face_term") for e in face_ev) else None
+        for k, e in enumerate(face_ev, 1):
+            if e.get("clinical_onset_s") is None:
+                continue
+            end = e.get("clinical_end_s")
+            end = end if end is not None else e["clinical_onset_s"] + 0.04
+            i = span(fe, e["clinical_onset_s"], end, e.get("side") or "")
+            if e.get("face_term"):
+                fterm.append(("ref", ann_id(), i, e["face_term"]))
+            if e.get("eeg_onset_s") is not None:
+                span(eeg, e["eeg_onset_s"], e["eeg_onset_s"] + 0.04, f"fe{k:02d}")
+            if e.get("notes"):
+                span(notes, e["clinical_onset_s"], end, e["notes"])
     for n in ann.get("notes", []):
         span(notes, n["start_s"], n.get("end_s") or n["start_s"] + 1.0, n["text"])
     for x in ann.get("excludes", []):
@@ -256,9 +296,16 @@ def read_eaf(eaf, video=None) -> dict:
     types = {r["ref"]: r["value"] for r in tiers.get("ILAE2017_type", {}).get("rows", [])}
     sz = sorted(tiers.get("Seizure", {}).get("rows", []), key=lambda r: r["start_s"])
     eeg = {r["value"]: r["start_s"] for r in tiers.get("EEG_onset", {}).get("rows", [])}
-    events = [dict(clinical_onset_s=r["start_s"], clinical_end_s=r["end_s"], event_class=r["value"],
+    events = [dict(mode="body", clinical_onset_s=r["start_s"], clinical_end_s=r["end_s"], event_class=r["value"],
                    seizure_type=types.get(r["id"], ""), eeg_onset_s=eeg.get(f"sz{k:02d}"))
               for k, r in enumerate(sz, 1)]
+    fterms = {}
+    for tid in {"Face_term", face_term_tier()}:
+        fterms.update({r["ref"]: r["value"] for r in tiers.get(tid, {}).get("rows", [])})
+    fe = sorted(tiers.get("Face_event", {}).get("rows", []), key=lambda r: r["start_s"])
+    events += [dict(mode="face", clinical_onset_s=r["start_s"], clinical_end_s=r["end_s"], side=r["value"] or None,
+                    face_term=fterms.get(r["id"], ""), eeg_onset_s=eeg.get(f"fe{k:02d}"))
+               for k, r in enumerate(fe, 1)]
     return dict(properties=props, tiers=tiers, events=sorted(events, key=lambda e: e["clinical_onset_s"]))
 
 
@@ -310,9 +357,9 @@ def write_signals(rows: list[dict], video) -> Path:
 
 
 SPEED_MAX = 1.5   # fixed y range for speed lanes (ELAN's CSV loader ignores detect-range); clips above it
-_TRACKS = [("p_smooth5s", "Detector A 5 s smoothed probability (alarm threshold in header)", "p", 0, 1, "0,220,0"),
+_TRACKS = [("p_smooth5s", "Detector A 5 s smoothed probability (score threshold in header)", "p", 0, 1, "0,220,0"),
            ("p_seizure", "Detector A raw per-second probability", "p", 0, 1, "0,110,0"),
-           ("alarm", "Detector A alarm state (0/1)", "", 0, 1, "255,40,40"),
+           ("alarm", "Detector A flagged state (0/1)", "", 0, 1, "255,40,40"),
            ("driver_speed", "mean speed of the top-driver regions (gap when none)", "body/s", 0, SPEED_MAX, "255,190,0")] + \
           [(f"speed_{r}", f"{r} speed", "body/s", 0, SPEED_MAX, c) for r, c in
            zip(REGIONS, ("255,255,0", "0,200,0", "0,0,200", "128,255,0", "100,100,255", "0,200,0", "0,0,200", "180,180,180"))]

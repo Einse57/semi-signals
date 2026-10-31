@@ -13,8 +13,27 @@ For each input video, samples frames at a fixed rate and writes an .npz with:
                Gaussian-weighted patches around 15 joints of the subject
   meta         json string (fps, size, models, ...)
 
+With --face (off by default; without it the file is unchanged), MediaPipe Face Landmarker. Where it
+looks is set by --face-preprocess (src/face_preprocess.py): none (default; the frame is the face region,
+one face per frame), detect (find, crop and align one face per frame) or coco-head (a head crop of every
+person with a pose, from the COCO head keypoints). With none/detect the face is stored in the slot of
+the person whose head keypoints are nearest to it (slot 0 when no person was found); face_person says
+which slot holds it. PROVISIONAL: the face keys may change (docs/SEGMENT_STORAGE.md).
+  face_landmarks   (F, P, 478, 3) float32  x, y in frame px; z in px on the x scale, relative to the
+                                           face centre (MediaPipe convention). NaN = no face.
+  face_blendshapes (F, P, 52)     float32  MediaPipe blendshape scores 0..1 (names in
+                                           meta["face"]["blendshape_names"]). NaN = no face.
+  face_scores      (F, P)         float32  1.0 = face returned (passed the detection and presence
+                                           thresholds); NaN = no face or no person.
+  face_boxes       (F, P, 4)      float32  crop x1,y1,x2,y2 used (axis-aligned; NaN = no crop)
+  face_person      (F,)           int16    slot holding the face (none/detect), -1 = no face; with
+                                           coco-head: the tracked subject (sel)
+  face_transform   (F, P, 4, 4)   float32  only with --face-transform: MediaPipe facial transformation
+                                           matrix (canonical face model -> detected face, crop camera)
+Schema details: docs/FACE_LANDMARKS.md.
+
 Usage:
-  python -m src.batch_extract --out OUT_DIR [--fps 6] [--device cuda] [--patches] video1.mp4 ...
+  python -m src.batch_extract --out OUT_DIR [--fps 6] [--device cuda] [--patches] [--face] video1.mp4 ...
 """
 
 from __future__ import annotations
@@ -115,7 +134,22 @@ class SubjectTracker:
         return k
 
 
-def process_video(path: Path, out_path: Path, det, pose, hand, fps: float, patches: bool) -> dict:
+def face_slot(face_lm, bk, bs, n_persons, conf_thr=0.3) -> int:
+    """Person slot for a face found without body keypoints: the person whose visible head keypoints
+    (nose, eyes, ears) are nearest to the face centre; 0 when no person has visible head keypoints."""
+    c = np.asarray(face_lm, np.float32)[:468, :2].mean(0)
+    best, best_d = 0, np.inf
+    for i in range(n_persons):
+        vis = [j for j in range(5) if bs[i, j] >= conf_thr and np.isfinite(bk[i, j]).all()]
+        if vis:
+            d = float(np.linalg.norm(bk[i, vis].mean(0) - c))
+            if d < best_d:
+                best, best_d = i, d
+    return best
+
+
+def process_video(path: Path, out_path: Path, det, pose, hand, fps: float, patches: bool, face=None,
+                  face_pre=None) -> dict:
     import cv2
     cap = cv2.VideoCapture(str(path))
     if not cap.isOpened():
@@ -126,6 +160,8 @@ def process_video(path: Path, out_path: Path, det, pose, hand, fps: float, patch
     step = 1.0 / fps
     next_t = 0.0
     T, FI, BK, BS, BB, SEL, HK, HS, PT = [], [], [], [], [], [], [], [], []
+    FL, FB, FS, FX, FT, FP = [], [], [], [], [], []
+    face_tf = face is not None and getattr(face, "_transform", False)
     tracker = SubjectTracker()
     fi = -1
     t0 = time.time()
@@ -159,6 +195,31 @@ def process_video(path: Path, out_path: Path, det, pose, hand, fps: float, patch
             for j, side in enumerate(("left", "right")):
                 if hr[side] is not None:
                     hk[j], hs[j] = hr[side]["keypoints"], hr[side]["scores"]
+        if face is not None:
+            from src.face_estimator import empty_face
+            fe = empty_face(MAX_PERSONS)
+            if face_pre is None or face_pre.mode == "coco-head":
+                for i, p in enumerate(persons):
+                    fr = face.estimate(frame, bk[i], bs[i], body_bbox=bb[i])
+                    if fr is not None:
+                        for k_ in ("landmarks", "blendshapes", "score", "bbox", "transform"):
+                            fe[k_][i] = fr[k_]
+                    elif np.isfinite(bk[i]).any():
+                        from src.face_estimator import head_crop_bbox
+                        bx = head_crop_bbox(bk[i], bs[i], H, W, body_bbox=bb[i])
+                        if bx is not None:
+                            fe["bbox"][i] = bx
+                FP.append(sel)
+            else:
+                fr = face_pre.run(frame)
+                slot = -1
+                if fr is not None:
+                    slot = face_slot(fr["landmarks"], bk, bs, len(persons))
+                    for k_ in ("landmarks", "blendshapes", "score", "bbox", "transform"):
+                        fe[k_][slot] = fr[k_]
+                FP.append(slot)
+            FL.append(fe["landmarks"]); FB.append(fe["blendshapes"]); FS.append(fe["score"])
+            FX.append(fe["bbox"]); FT.append(fe["transform"])
         if patches:
             if sel >= 0:
                 PT.append(extract_vsvig_patches(frame, bk[sel][VSVIG_COCO_ORDER]))
@@ -181,6 +242,23 @@ def process_video(path: Path, out_path: Path, det, pose, hand, fps: float, patch
                 hand_kpts=np.array(HK).reshape(-1, 2, 21, 2),
                 hand_scores=np.array(HS).reshape(-1, 2, 21),
                 meta=np.array(json.dumps(meta)))
+    if face is not None:
+        from src.face_estimator import N_FACE, N_BLEND, BLENDSHAPE_NAMES, FACE_TASK_URL
+        arrs["face_landmarks"] = np.array(FL, np.float32).reshape(-1, MAX_PERSONS, N_FACE, 3)
+        arrs["face_blendshapes"] = np.array(FB, np.float32).reshape(-1, MAX_PERSONS, N_BLEND)
+        arrs["face_scores"] = np.array(FS, np.float32).reshape(-1, MAX_PERSONS)
+        arrs["face_boxes"] = np.array(FX, np.float32).reshape(-1, MAX_PERSONS, 4)
+        arrs["face_person"] = np.array(FP, np.int16)
+        if face_tf:
+            arrs["face_transform"] = np.array(FT, np.float32).reshape(-1, MAX_PERSONS, 4, 4)
+        meta["face"] = dict(model="MediaPipe Face Landmarker", model_url=FACE_TASK_URL,
+                            model_file=os.path.basename(face.model_path), runtime=getattr(face, "runtime", "mediapipe (TFLite/XNNPACK, CPU)"),
+                            schema="semi-signals.face/1", n_landmarks=N_FACE, blendshape_names=BLENDSHAPE_NAMES,
+                            crop=("head keypoints (src/face_estimator.head_crop_bbox)" if face_pre is None
+                                  or face_pre.mode == "coco-head" else f"face_preprocess={face_pre.mode}"),
+                            preprocess=face_pre.mode if face_pre is not None else "coco-head",
+                            transform=bool(face_tf), provisional=True)
+        arrs["meta"] = np.array(json.dumps(meta))
     if patches:
         arrs["patches"] = np.array(PT, np.uint8).reshape(-1, 15, 32, 32, 3)
     tmp = out_path.with_suffix(".tmp.npz")
@@ -217,6 +295,16 @@ def main(argv=None) -> int:
     ap.add_argument("--threads", type=int, default=2, help="OpenCV threads")
     ap.add_argument("--ort-threads", type=int, default=0, help="ONNX Runtime intra-op threads (0 = default)")
     ap.add_argument("--det-thr", type=float, default=0.3, help="person detector score threshold")
+    ap.add_argument("--face", action="store_true",
+                    help="add MediaPipe face landmarks + blendshapes (off by default; see --face-preprocess)")
+    ap.add_argument("--face-transform", action="store_true",
+                    help="with --face: also save MediaPipe's facial transformation matrix per face")
+    ap.add_argument("--face-model", default=None, help="face_landmarker.task (default models/face_landmarker.task)")
+    ap.add_argument("--face-preprocess", default="none", choices=["none", "detect", "coco-head"],
+                    help="with --face: none = frames are the face region (default); detect = find, crop and "
+                         "align one face; coco-head = head crop of every person from the body keypoints")
+    from src.face_estimator import add_face_backend_args
+    add_face_backend_args(ap)
     a = ap.parse_args(argv)
 
     import cv2
@@ -233,6 +321,13 @@ def main(argv=None) -> int:
     det = PersonDetector(device=a.device, backend=backend, score_thr=a.det_thr)
     pose = PoseEstimator(device=a.device, backend=backend)
     hand = None if a.no_hands else HandEstimator(device=a.device, backend=backend)
+    face = face_pre = None
+    if a.face:
+        from src.face_estimator import FaceEstimator
+        from src.face_preprocess import FacePreprocessor
+        face = FaceEstimator(model_path=a.face_model, transform=a.face_transform,
+                             backend=a.face_backend, device=a.face_device)
+        face_pre = FacePreprocessor(face, a.face_preprocess)
 
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
     for v in a.videos:
@@ -243,10 +338,14 @@ def main(argv=None) -> int:
             print(f"skip {name}", flush=True); continue
         print(f"start {v}", flush=True)
         try:
-            meta = process_video(v, op, det, pose, hand, a.fps, a.patches)
+            meta = process_video(v, op, det, pose, hand, a.fps, a.patches, face=face, face_pre=face_pre)
+            if face_pre is not None:
+                face_pre.reset()
             print(f"done {name} {json.dumps(meta)}", flush=True)
         except Exception as e:  # keep going on other videos
             print(f"FAIL {v}: {e!r}", flush=True)
+    if face is not None:
+        face.close()
     return 0
 
 

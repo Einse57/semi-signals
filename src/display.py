@@ -7,6 +7,7 @@ import math
 import cv2
 import numpy as np
 
+from src.textdraw import put_text
 from src.config import (
     BODY_REGIONS,
     CHART_GROUPS,
@@ -171,8 +172,7 @@ def _draw_single_chart(
             px = int(frac * plot_w)
             cv2.line(canvas, (px, plot_y0), (px, plot_y0 + plot_h),
                      (40, 40, 40), 1)
-            cv2.putText(canvas, f"-{mins}m", (px + 2, plot_y0 + 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.25, (80, 80, 80), 1)
+            put_text(canvas, f"-{mins}m", (px + 2, plot_y0 + 2), 10, (110, 110, 110), anchor="lt")
 
     for key in region_keys:
         data = list(region_histories.get(key, []))
@@ -205,8 +205,7 @@ def _draw_single_chart(
             prev_pt = cur_pt
 
     # Title (left)
-    cv2.putText(canvas, title, (3, 11),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.35, (180, 180, 180), 1)
+    put_text(canvas, title, (3, 1), 12, (190, 190, 190), anchor="lt")
 
     # Legend (right)
     lx = plot_w + 4
@@ -215,8 +214,7 @@ def _draw_single_chart(
         color = REGION_COLORS.get(key, (200, 200, 200))
         label = key.replace("l_", "L ").replace("r_", "R ")
         cv2.line(canvas, (lx, ly), (lx + 10, ly), color, 2)
-        cv2.putText(canvas, label, (lx + 13, ly + 3),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.28, color, 1)
+        put_text(canvas, label, (lx + 13, ly), 11, color, anchor="lm")
         ly += 13
 
     # Separator line at bottom
@@ -231,6 +229,7 @@ def draw_region_chart(
     chart_w: int = DISPLAY_WIDTH,
     chart_h: int = 250,
     timestamps: list[float] | object | None = None,
+    groups: list[tuple[str, list[str]]] | None = None,
 ) -> np.ndarray:
     """Render 4 stacked mini-charts based on CHART_GROUPS config.
 
@@ -240,11 +239,12 @@ def draw_region_chart(
     Returns a BGR image of size (chart_h, chart_w, 3).
     """
     ts = list(timestamps) if timestamps is not None else None
-    n_groups = len(CHART_GROUPS)
+    groups = CHART_GROUPS if groups is None else groups
+    n_groups = len(groups)
     per_h = chart_h // n_groups
     strips: list[np.ndarray] = []
 
-    for title, region_keys in CHART_GROUPS:
+    for title, region_keys in groups:
         strip = _draw_single_chart(
             title, region_keys, region_histories,
             chart_w, per_h, timestamps=ts,
@@ -268,10 +268,7 @@ def draw_angles_overlay(
     y = origin[1]
     for name, deg in angles.items():
         text = f"{name}: {deg:.0f} deg"
-        cv2.putText(
-            frame, text, (origin[0], y),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1,
-        )
+        put_text(frame, text, (origin[0], y), 15, (255, 255, 255))
         y += 20
     return frame
 
@@ -283,3 +280,47 @@ def compose_display(
     """Stack video frame (top) and chart (bottom) into a single window."""
     frame_resized = cv2.resize(video_frame, (DISPLAY_WIDTH, DISPLAY_HEIGHT))
     return np.vstack([frame_resized, chart_img])
+
+
+# ── Face mesh (optional --face) ───────────────────────────────
+def _face_edges():
+    """(tesselation, contours) edge lists from MediaPipe, or ([], []) if unavailable."""
+    global _FACE_EDGES
+    if _FACE_EDGES is None:
+        try:
+            from mediapipe.tasks.python.vision.face_landmarker import FaceLandmarksConnections as C
+            tess = [(c.start, c.end) for c in C.FACE_LANDMARKS_TESSELATION]
+            cont = [(c.start, c.end) for c in C.FACE_LANDMARKS_CONTOURS]
+            iris = [(c.start, c.end) for c in (*C.FACE_LANDMARKS_LEFT_IRIS, *C.FACE_LANDMARKS_RIGHT_IRIS)]
+            _FACE_EDGES = (tess, cont + iris)
+        except Exception:
+            _FACE_EDGES = ([], [])
+    return _FACE_EDGES
+
+
+_FACE_EDGES = None
+
+
+def draw_face_mesh(frame: np.ndarray, landmarks: np.ndarray | None, mesh: bool = True,
+                   color=(200, 200, 200), contour_color=(0, 220, 255)) -> np.ndarray:
+    """Draw 478 face landmarks (x, y in frame px): thin tesselation (mesh=True) plus contours of the
+    eyes, brows, lips, face oval and irises. Mutates frame; returns it."""
+    if landmarks is None:
+        return frame
+    p = np.asarray(landmarks, np.float32)[:, :2]
+    if not np.isfinite(p).all():
+        return frame
+    pts = np.round(p).astype(np.int32)
+    tess, cont = _face_edges()
+    if mesh and tess:
+        overlay = frame.copy()
+        for a, b in tess:
+            cv2.line(overlay, tuple(pts[a]), tuple(pts[b]), color, 1, cv2.LINE_AA)
+        cv2.addWeighted(overlay, 0.45, frame, 0.55, 0, dst=frame)
+    if cont:
+        for a, b in cont:
+            cv2.line(frame, tuple(pts[a]), tuple(pts[b]), contour_color, 1, cv2.LINE_AA)
+    else:
+        for x, y in pts:
+            cv2.circle(frame, (int(x), int(y)), 1, contour_color, -1)
+    return frame

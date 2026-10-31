@@ -9,9 +9,48 @@ third_party/vsvig/VSViG.py and third_party/vsvig/dy_point_order.pt
   "VSViG: Real-Time Video-Based Seizure Detection via Skeleton-Based Spatiotemporal ViG", ECCV 2024.
   Licensed under the Apache License, Version 2.0 (third_party/vsvig/LICENSE).
   Modified: removed timm/torchvision imports; the partition file path is resolved next to VSViG.py.
+  dy_point_order.pt is unmodified: a non-learned table of 1000 point orders (each a permutation of the 15
+  keypoints in five 3-point groups) that the upstream README says was randomly generated. Source:
+  https://github.com/xuyankun/VSViG/blob/1026e7e7f2287b96f3cc375830f2836ffdf4588e/dy_point_order.pt,
+  sha256 9aa778ca1221f47b6afe0242787becfdfaae3f2424b54dd15a48c585ef0a0ced, Apache-2.0.
 
 Models and data used at run time are not included and keep their own licences:
   VSViG-base weights and the WU-SAHZU-EMU-Video dataset (Apache-2.0, by the VSViG authors);
   rtmlib, RTMPose and YOLOX (Apache-2.0); the YOLOX-tiny checkpoint was trained with Human-Art
   (non-commercial licence) and the RTMPose body7/hand5 checkpoints include research-only datasets;
   MCEC_Seizure skeletons (CC BY 4.0, Kuang et al., 2024).
+  Optional: MediaPipe and the MediaPipe Face Landmarker model bundle (BlazeFace short-range, Face Mesh V2,
+  Blendshape V2), Google, Apache-2.0, https://github.com/google-ai-edge/mediapipe. The model cards
+  describe AR/entertainment use and state the models are not intended for life-critical decisions;
+  see docs/FACE_LANDMARKS.md.
+
+Face de-identification numbers (docs/FACE_DEID_TRADEOFF.md) come from clips not included here:
+  GRID audio-visual speech corpus, M. Cooke, J. Barker, S. Cunningham and X. Shao (2006),
+  https://doi.org/10.5281/zenodo.3625687, CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/).
+  Intel IoT DevKit sample videos, Intel Corporation, https://github.com/intel-iot-devkit/sample-videos,
+  CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/).
+One figure is included: docs/figures/face_deid_grid_lwwy7p_fill_blur.png, frames 20 and 45 of GRID
+  clip lwwy7p (speaker s14), M. Cooke, J. Barker, S. Cunningham and X. Shao (2006), The GRID audio-visual
+  speech corpus, https://doi.org/10.5281/zenodo.3625687. Modified: face filled or blurred, panels
+  arranged and captioned. Licensed CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/), not MIT.
+Two README screenshots are included (docs/img/README.md):
+  docs/img/live_detector_a.png, a frame of pat10/Sz2P from the WU-SAHZU-EMU-Video dataset (VSViG authors,
+  Apache-2.0), with the viewer overlay and panels added.
+  docs/img/annotation_face_fill.png, a frame of head-pose-face-detection-female-and-male.mp4, Intel IoT
+  DevKit sample videos, Intel Corporation, https://github.com/intel-iot-devkit/sample-videos. Modified:
+  faces filled, tool windows added. Licensed CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/), not MIT.
+Face-check models (YuNet, MIT; SFace, Apache-2.0; OpenCV Zoo) and face-swap code and weights are fetched by
+the user and not included; licences in docs/FACE_SWAP_LICENCES.md.
+Files derived from MediaPipe (https://github.com/google-ai-edge/mediapipe), Copyright The MediaPipe
+Authors, Apache License 2.0 (LICENSES/Apache-2.0.txt). Modified: the C++ graphs and calculators are
+re-implemented in Python/numpy for the optional OpenVINO face backend; no MediaPipe source file is copied.
+Constants taken from MediaPipe: SSD anchor options, detection decoding and NMS settings, rect/ROI scales,
+landmark indices including the 146-index blendshape subset, One Euro filter settings, and the face
+geometry camera and Procrustes settings (the canonical face mesh and weights are read at run time from
+the user-fetched model bundle). Each file starts with a header naming the MediaPipe files it follows.
+  src/face_ov/geometry.py       detector anchors, decoding, weighted NMS, rect transforms, landmark
+                                projection, blendshape input, One Euro smoothing
+  src/face_ov/landmarker.py     Face Landmarker graph (detector, tracking, rect association, landmarks,
+                                blendshapes)
+  src/face_ov/face_geometry.py  facial transformation matrix (geometry pipeline, Procrustes solver)
+The rest of the repository is MIT (LICENSE). See docs/FACE_OPENVINO.md.

@@ -6,6 +6,9 @@
   python scripts/fetch_models.py --skip-vsvig --force
   python scripts/fetch_models.py --clips pat12/Sz1P,pat12/Sz2P   # other sample clips (or --clips all, ~27 GB)
   python scripts/fetch_models.py --skip-data           # models only
+  python scripts/fetch_models.py --face --skip-data    # also the optional MediaPipe face model
+  python scripts/fetch_models.py --face-check --skip-data --skip-vsvig   # de-identification check and warp files
+  python scripts/fetch_models.py --ghost --accept-ghost-licences --skip-data --skip-vsvig   # GHOST swap (research use)
 
 What it does:
 1. Pose models (YOLOX-tiny, RTMPose-m body7 and hand5): downloads them into rtmlib's own cache
@@ -13,14 +16,24 @@ What it does:
 2. VSViG-base: downloads `VSViG-base.pth` and `dy_point_order.pt` from the official repository
    (github.com/xuyankun/VSViG, pinned commit), checks sha256, then converts to ONNX and OpenVINO IR
    with `src/export_vsvig.py` only if the IR is missing or was built from different weights.
-   Conversion needs torch (CPU build is enough); the live viewer itself does not. Without torch the
-   conversion is reported as skipped.
+   Conversion needs torch (CPU build is enough) and onnx; the live viewer itself does not. Without torch
+   the conversion is reported as skipped.
 3. Detector A: downloads from the Hugging Face repo `Einse57/semi-signals-detector-a` with the pinned
    SHA-256s in `src/hf_models.py`,
    or copies a local model given with `--detector-a PATH` (its `.json` sidecar is taken from next to it).
 4. Sample data: `Label.xlsx` and a few clips from the Hugging Face dataset `xuyankun/WU-SAHZU-EMU-Video`
    (Apache-2.0, pinned commit) into --data-dir, without the dataset's `dataset/` prefix
    (e.g. `data/Label.xlsx`, `data/pat10/Sz2P.mp4`).
+
+5. Optional (--face): MediaPipe Face Landmarker bundle `face_landmarker.task` (Google, Apache-2.0)
+   from storage.googleapis.com into --models-dir, sha256-checked. Only the optional face stage uses it.
+6. Optional (--face-check): files for the de-identification check and the warp face swap, pinned and
+   sha256-checked: YuNet face detector (OpenCV Zoo, MIT), SFace face recognizer (OpenCV Zoo, Apache-2.0)
+   and the MediaPipe canonical face mesh (Apache-2.0). See docs/FACE_SWAP_LICENCES.md.
+7. Optional (--ghost): the GHOST face swap, research use only. Clones github.com/ai-forever/ghost at a pinned
+   commit and downloads four files from its GitHub releases, sha256-checked, into --ghost-dir
+   (default ./third_party_local, git-ignored). Needs --accept-ghost-licences or a "y" at the prompt; without
+   it nothing is fetched and the script exits with code 2.
 
 Hashes of everything in --models-dir are recorded in `<models-dir>/MANIFEST.json` (sample data under "data").
 Works on Windows, macOS and Linux. Model files are not part of the repository.
@@ -81,6 +94,14 @@ Attribution
   rtmlib, RTMPose, YOLOX: Apache-2.0. Note: the YOLOX-tiny checkpoint was trained with Human-Art
     (non-commercial licence) and the RTMPose body7/hand5 checkpoints include research-only datasets.
   Research use only, not a medical device."""
+FACE_CREDIT = """  MediaPipe Face Landmarker (BlazeFace short-range, Face Mesh V2, Blendshape V2): Google,
+    Apache License 2.0. https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker
+    Model cards: intended for AR/entertainment; not for life-critical decisions."""
+
+FACE_FILE = "face_landmarker.task"
+FACE_URL = ("https://storage.googleapis.com/mediapipe-models/face_landmarker/"
+            "face_landmarker/float16/1/face_landmarker.task")
+FACE_SHA256 = "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff"
 
 
 def sha256(p: Path) -> str:
@@ -342,6 +363,149 @@ def step_data(a, man: Manifest, status):
     print(DATA_CREDIT)
 
 
+# ── 5. optional face model ───────────────────────────────────
+def step_face(a, md: Path, man: Manifest, status):
+    dst = md / FACE_FILE
+    print(f"[5/5] MediaPipe Face Landmarker (optional) -> {dst}")
+    if ok_file(dst, FACE_SHA256) and not (a.force and not a.offline):
+        print(f"    ok  {FACE_FILE}")
+    elif a.offline:
+        status["face"] = f"FAILED: {FACE_FILE} missing or sha256 mismatch"; print("    " + status["face"]); return
+    else:
+        try:
+            download(FACE_URL, dst)
+        except OSError as e:
+            status["face"] = f"FAILED: download ({type(e).__name__})"; print("    " + status["face"]); return
+        h = sha256(dst)
+        if FACE_SHA256 is not None and h != FACE_SHA256:
+            dst.unlink()
+            status["face"] = f"FAILED: {FACE_FILE} sha256 mismatch ({h[:12]}...)"; print("    " + status["face"]); return
+        print(f"    ok  {FACE_FILE} (downloaded, " + ("sha256 verified)" if FACE_SHA256 else f"sha256 {h}, not pinned yet)"))
+    man.set(FACE_FILE, sha256=FACE_SHA256 or sha256(dst), source=FACE_URL, license="Apache-2.0")
+    status["face"] = "ok"
+    print(FACE_CREDIT)
+
+
+ZOO = "https://media.githubusercontent.com/media/opencv/opencv_zoo/48b10fa505aeb51fbd127fc60a5c660040e823b7/models/"
+MP_RAW = "https://raw.githubusercontent.com/google-ai-edge/mediapipe/a908d668c730da128dfa8d9f6bd25d519d006692/"
+CHECK_FILES = {  # name: (url, sha256, licence)
+    "face_detection_yunet_2023mar.onnx": (ZOO + "face_detection_yunet/face_detection_yunet_2023mar.onnx",
+        "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4", "MIT"),
+    "face_recognition_sface_2021dec.onnx": (ZOO + "face_recognition_sface/face_recognition_sface_2021dec.onnx",
+        "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79", "Apache-2.0"),
+    "canonical_face_model.obj": (MP_RAW + "mediapipe/modules/face_geometry/data/canonical_face_model.obj",
+        "8bac80443397e113f41a8b565ea72c59390bc031d9defab289dba7bc0c54e618", "Apache-2.0"),
+}
+
+
+def step_face_check(a, md: Path, man: Manifest, status):
+    print(f"[6] de-identification check files (optional) -> {md}")
+    bad = []
+    for name, (url, want, lic) in CHECK_FILES.items():
+        dst = md / name
+        if not ok_file(dst, want) or (a.force and not a.offline):
+            if a.offline:
+                bad.append(f"{name} missing or sha256 mismatch"); continue
+            try:
+                download(url, dst)
+            except OSError as e:
+                bad.append(f"{name} download ({type(e).__name__})"); continue
+            if sha256(dst) != want:
+                dst.unlink(); bad.append(f"{name} sha256 mismatch"); continue
+        print(f"    ok  {name} ({lic})")
+        man.set(name, sha256=want, source=url, license=lic)
+    status["face-check"] = "ok" if not bad else "FAILED: " + "; ".join(bad)
+
+
+# ── 7. GHOST face swap (optional, research use only) ─────────
+GHOST_REPO = "https://github.com/ai-forever/ghost"
+GHOST_COMMIT = "44e58aad8600ee83ad4c8213aaa9698ccaf66c1c"
+GHOST_REL = GHOST_REPO + "/releases/download/"
+GHOST_FILES = {  # name: (url, sha256, licence)
+    "G_unet_2blocks.pth": (GHOST_REL + "sber-swap-v2.0/G_unet_2blocks.pth",
+        "85f130421c65722927c47502ea1b28b62be4893ca9180fec735b67be1e5edd8d", "Apache-2.0 (GHOST repository licence)"),
+    "backbone.pth": (GHOST_REL + "arcface/backbone.pth",
+        "a566a62357f0c55b679d9ff2f022a294486568be0c00665d39029d0e46a8109b", "InsightFace model: non-commercial research only"),
+    "iresnet.py": (GHOST_REL + "arcface/iresnet.py",
+        "990006bfcd6583bdc9775045dfe02cbb10904018c0c34825f05d9cdd834fd388", "InsightFace code: MIT"),
+    "glintr100.onnx": (GHOST_REL + "antelope/glintr100.onnx",
+        "4ab1d6435d639628a6f3e5008dd4f929edf4c4124b1a7169e1048f9fef534cdf", "InsightFace model: non-commercial research only"),
+}
+GHOST_NOTICE = f"""GHOST face swap files (research use only, not redistributed by this repository):
+  {"code":<20s}{GHOST_REPO} @ {GHOST_COMMIT[:12]}  Apache-2.0
+""" + "".join(f"  {n:<20s}{u}\n  {"":<20s}{lic}\n" for n, (u, _, lic) in GHOST_FILES.items()) + """\
+  InsightFace terms (models non-commercial research only): https://github.com/deepinsight/insightface#license
+  The GHOST generator was trained on VGGFace2. Swaps made with these files are reduced risk,
+  not de-identified, and stay local. See docs/FACE_SWAP_LICENCES.md."""
+
+
+def ghost_acknowledged(a, ask=None) -> bool:
+    """True only with --accept-ghost-licences or a "y" answer on an interactive terminal."""
+    if a.accept_ghost_licences:
+        return True
+    print(GHOST_NOTICE)
+    if not sys.stdin.isatty():
+        return False
+    try:
+        return (ask or input)("Accept these licences and fetch the GHOST files? [y/N] ").strip().lower() in ("y", "yes")
+    except EOFError:
+        return False
+
+
+def clone_ghost(dst: Path):
+    if (dst / ".git").exists():
+        head = subprocess.run(["git", "-C", str(dst), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+        if head != GHOST_COMMIT:
+            raise RuntimeError(f"{dst} is at {head[:12] or '?'}, not {GHOST_COMMIT[:12]}; move it away and run again")
+        return "present"
+    dst.mkdir(parents=True, exist_ok=True)
+    for cmd in (["init", "-q"], ["remote", "add", "origin", GHOST_REPO + ".git"],
+                ["fetch", "-q", "--depth", "1", "origin", GHOST_COMMIT], ["checkout", "-q", "FETCH_HEAD"]):
+        subprocess.run(["git", "-C", str(dst), *cmd], check=True)
+    head = subprocess.run(["git", "-C", str(dst), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    if head != GHOST_COMMIT:
+        raise RuntimeError(f"cloned {head[:12]}, expected {GHOST_COMMIT[:12]}")
+    return "cloned"
+
+
+def step_ghost(a, status):
+    gd = Path(a.ghost_dir).expanduser().resolve()
+    wd = gd / "weights" / "ghost"
+    print(f"[7] GHOST face swap (optional, research use only) -> {gd}")
+    bad = []
+    if a.offline:
+        ok = (gd / "ghost" / ".git").exists()
+        if not ok:
+            bad.append("ghost checkout missing")
+    else:
+        try:
+            print(f"    {clone_ghost(gd / 'ghost')}  ghost @ {GHOST_COMMIT[:12]}")
+        except Exception as e:  # noqa: BLE001
+            bad.append(f"ghost code: {e}")
+    for name, (url, want, lic) in GHOST_FILES.items():
+        dst = wd / name
+        if ok_file(dst, want) and not (a.force and not a.offline):
+            print(f"    ok  {name} ({lic})"); continue
+        if a.offline:
+            bad.append(f"{name} missing or sha256 mismatch"); continue
+        try:
+            download(url, dst)
+        except Exception as e:  # noqa: BLE001
+            bad.append(f"{name}: {e}"); continue
+        h = sha256(dst)
+        if h != want:
+            dst.unlink()
+            bad.append(f"{name} sha256 mismatch ({h[:12]}...), removed"); continue
+        print(f"    ok  {name} (downloaded, sha256 verified; {lic})")
+    if not bad:
+        cfg = {"models": {"code": str(gd / "ghost"), "generator": str(wd / "G_unet_2blocks.pth"),
+                          "id_embedder": str(wd / "backbone.pth")},       # "models" block of the ghost config
+               "arcface_model": str(wd / "glintr100.onnx")}               # "model" of the deid_check arcface config
+        (gd / "ghost_models.json").write_text(json.dumps(cfg, indent=2) + "\n")
+        print(f"    local paths for the ghost and arcface configs: {gd / 'ghost_models.json'}")
+    status["ghost"] = "ok" if not bad else "FAILED: " + "; ".join(bad)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--models-dir", default=str(ROOT / "models"))
@@ -353,7 +517,19 @@ def main(argv=None):
     ap.add_argument("--clips", default=DEFAULT_CLIPS,
                     help=f"sample clips, comma-separated patNN/SzNP (default {DEFAULT_CLIPS}); 'all' for every video (~27 GB)")
     ap.add_argument("--data-dir", default=str(ROOT / "data"), help="where Label.xlsx and the clips go (default ./data)")
+    ap.add_argument("--face", action="store_true", help="also fetch the optional MediaPipe face model")
+    ap.add_argument("--face-check", action="store_true",
+                    help="also fetch YuNet, SFace and the canonical face mesh (de-identification check and warp)")
+    ap.add_argument("--ghost", action="store_true",
+                    help="also fetch the GHOST face swap code and weights (research use only; needs the licence acknowledgement)")
+    ap.add_argument("--accept-ghost-licences", action="store_true",
+                    help="accept the GHOST (Apache-2.0) and InsightFace (non-commercial research) licences without a prompt")
+    ap.add_argument("--ghost-dir", default=str(ROOT / "third_party_local"),
+                    help="where the GHOST checkout and weights go (default ./third_party_local, git-ignored)")
     a = ap.parse_args(argv)
+    if a.ghost and not ghost_acknowledged(a):
+        print("GHOST licences not accepted: nothing fetched. Run again with --accept-ghost-licences.", file=sys.stderr)
+        return 2
     md = Path(a.models_dir).expanduser().resolve(); md.mkdir(parents=True, exist_ok=True)
     man = Manifest(md / "MANIFEST.json")
     status = {}
@@ -367,6 +543,12 @@ def main(argv=None):
         status["data"] = "skipped"
     else:
         step_data(a, man, status)
+    if a.face:
+        step_face(a, md, man, status)
+    if a.face_check:
+        step_face_check(a, md, man, status)
+    if a.ghost:
+        step_ghost(a, status)
     man.save()
     print("\nSummary (models dir: %s)" % md)
     for k, v in status.items():

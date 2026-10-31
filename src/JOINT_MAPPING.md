@@ -12,7 +12,7 @@ VSViG uses **15 of the 17 COCO joints**, dropping both ears (indices 3, 4). It r
 | l_arm     | 9, 10, 11      | 5, 7, 9        | L shoulder, L elbow, L wrist    |
 | l_leg     | 12, 13, 14     | 11, 13, 15     | L hip, L knee, L ankle          |
 
-## Our Regions (8 regions, 17+42 joints)
+## semi-signals regions (8 regions, 17+42 joints)
 
 | Region  | COCO-17 indices | Extra joints           | VSViG equivalent        |
 |---------|----------------|------------------------|-------------------------|
@@ -32,13 +32,13 @@ VSViG uses **15 of the 17 COCO joints**, dropping both ears (indices 3, 4). It r
 - **l_leg** / **r_leg** use the same 3 joints each (hip, knee, ankle).
 
 ### Arms → arms + hands
-VSViG packs shoulder, elbow, and wrist into each arm partition. We split the wrist into its own region (`l_hand` / `r_hand`) because we extend it with 21 fine-grained hand keypoints. If you merge `l_arm + l_hand` (and likewise right), you recover VSViG's arm partition plus 21 extra finger joints.
+VSViG packs shoulder, elbow, and wrist into each arm partition. semi-signals splits the wrist into its own region (`l_hand` / `r_hand`) because it is extended with 21 fine-grained hand keypoints. If you merge `l_arm + l_hand` (and likewise right), you recover VSViG's arm partition plus 21 extra finger joints.
 
 ### Torso
-VSViG has **no torso partition** — shoulders are part of arms, hips part of legs. We follow the same approach: no dedicated torso region.
+VSViG has **no torso partition** — shoulders are part of arms, hips part of legs. semi-signals follows the same approach: no dedicated torso region.
 
 ### Hands
-VSViG has no concept of hand/finger granularity — it uses 32×32 Gaussian-filtered RGB patch extraction around the wrist as a visual proxy. We extend this with a full 21-keypoint hand model per side.
+VSViG has no concept of hand/finger granularity — it uses 32×32 Gaussian-filtered RGB patch extraction around the wrist as a visual proxy. semi-signals extends this with a full 21-keypoint hand model per side.
 
 ### Ears (COCO indices 3, 4)
 Dropped, matching VSViG.

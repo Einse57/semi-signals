@@ -10,6 +10,9 @@ On Windows, from the repo folder:
 1. Double-click `start.cmd` (or run `.\start.ps1` in PowerShell). The first time, if there is no `.venv`, it
    offers to create one and install the requirements (the same steps as [Windows setup](#windows-setup-igpu-via-openvino),
    including the OpenCV fix). Behind a proxy, set `HTTPS_PROXY` first, or answer `n` to see the manual steps.
+   It looks for Python in this order: `SEMI_PYTHON`, pyenv-win, the `py` launcher, `python` on PATH. To pick
+   one yourself: `$env:SEMI_PYTHON = "C:\path\to\python.exe"` in PowerShell (or `set SEMI_PYTHON=...` in cmd)
+   before running it.
 2. In the launcher window, click **Fetch models & sample data** once (output in the log pane; the optional
    **Proxy** field sets `HTTPS_PROXY` for the download). VSViG is skipped when torch is not installed.
 3. Pick a sample clip from the **Video** list (`data\pat*\*.mp4`) or **Browse...** to any video.
@@ -38,7 +41,7 @@ Keys (also shown in a footer strip in each window; `h` hides or shows it):
 
 ## Live viewer (`src.run_seizure_demo`)
 - The video, with the tracked patient's body skeleton and hands.
-- **Detector A** (pose features + LightGBM, trained here): score every second, alert when the
+- **Detector A** (pose features + LightGBM, trained here): score every second, flag a segment when the
   5 s smoothed score stays at or above its threshold (0.95) for 3 s.
 - **Detector B** (VSViG-base, Apache-2.0 weights, OpenVINO IR): score every 0.5 s on the last 5 s.
   It is scored only when the tracked patient is in at least half of that window; otherwise the readout
@@ -46,8 +49,8 @@ Keys (also shown in a footer strip in each window; `h` hides or shows it):
   it returns about 0, which is not a meaningful score).
 - Markers for the EEG onset and clinical onset from `Label.xlsx`.
 - **Side panel** (all lanes share one time axis):
-  - probability strip: Detector A raw and 5 s smoothed score (0-1), dashed alarm threshold (0.95),
-    seconds in alarm shaded red, current value readout (and Detector B / iEEG lines when enabled);
+  - probability strip: Detector A raw and 5 s smoothed score (0-1), dashed score threshold (0.95),
+    flagged seconds shaded red, current value readout (and Detector B / iEEG lines when enabled);
   - **top drivers**: once per second, LightGBM `pred_contrib` splits Detector A's score into per-feature
     contributions; these are summed by body region and feature family (speed, jerk, 0.5-1.5 Hz and 1.5-3 Hz
     rhythm, visibility, left/right asymmetry, finger motion, people in view) and averaged over the same 5 s
@@ -62,7 +65,7 @@ Keys (also shown in a footer strip in each window; `h` hides or shows it):
 - End of video: the window stays open on the last frame with the graphs and the score strip, and shows
   "End of video: R replay, O open another video, Q quit" (`O` opens a file picker). `--loop` restarts by
   itself (`--max-loops N` to stop after N passes), `--exit-at-end` closes the window instead. A replay resets
-  all causal state (buffers, smoothing, alarms, explanations, graphs), so the scores repeat exactly.
+  all causal state (buffers, smoothing, flagged segments, explanations, graphs), so the scores repeat exactly.
 - Explanation cost: about 1 ms per second of video on CPU (`pred_contrib` once per second), and the
   panel is redrawn only when new samples arrive. Use `--no-explain` to turn it off, `--timing` for measurements.
 - Text is drawn anti-aliased with a TrueType font (`src/textdraw.py`: Segoe UI on Windows, DejaVu Sans on
@@ -84,7 +87,7 @@ Missing details are asked for in dialogs, not in the terminal.
    version the render was made with) next to it. The render is reused only when it is newer than the video
    and matches the current settings (VSViG on/off, hands, Detector A model) and overlay version; otherwise
    it is made again. `--reprocess` forces it.
-2. Plays the rendered video back in sync, with a timeline bar (red: model alarms, green: your marks).
+2. Plays the rendered video back in sync, with a timeline bar (red: flagged segments, green: your marks).
    Keys: `space` pause, `j`/`l` back/forward 5 s, `o` clinical onset (new event), `e` clinical end,
    `g` EEG onset, `t` seizure type (pick list of ILAE 2017 types, or type your own),
    `n` note (attached to the event under the playhead, else a timed note), `x` start/stop an exclude span,
@@ -100,13 +103,18 @@ Missing details are asked for in dialogs, not in the terminal.
    - `<stem>.eaf`: ELAN EAF 3.0 (ms). Tiers `Seizure` (onset-to-end, value from the `seizure_event` CV)
      with child `ILAE2017_type`, `EEG_onset` (empty for now), `Notes`, `Exclude`, and the model tiers
      `Model_alarm` (value = peak probability) with child `Model_drivers`. Header properties: video sha256, fps,
-     annotator, patient id/pseudonym, consent, model id, threshold, alarm rule, research-demo flag.
-   - `<stem>_signals.csv` (per second: probability, smoothed probability, alarm state, driver speed, region
+     annotator, patient id/pseudonym, consent, model id, threshold, flagging rule (`alarm_rule`), research-demo flag.
+     In Face or Both mode (`--mode`, launcher **Annotation mode**), face events go to a `Face_event` tier
+     (value = side L / R / both, or empty), their EEG onsets to `EEG_onset` as `fe01`, `fe02`, ... (body
+     events keep `sz01`, ... numbered over body events only), and terms, once `labels/face.json` has a list,
+     to a `Face_term` child tier. These tiers are written only when face events exist, so body-only files
+     are unchanged. See the README section "Annotation modes and label sets".
+   - `<stem>_signals.csv` (per second: probability, smoothed probability, flagged state (`alarm`), driver speed, region
      speeds; the header line starts with `#`, missing values are `NaN`), `<stem>_tsconf.xml` (track setup)
      and `<stem>.pfsx` (ELAN viewer layout, written only if absent), so ELAN's Timeseries Viewer shows the
      lanes on open. Keep the files together; ELAN finds them again after the folder is moved or unzipped.
-   - `<stem>.annotation.json`: the same content plus a comparison of your marks with the model's alarms
-     (alarm start within 30 s before to 60 s after your marked onset).
+   - `<stem>.annotation.json`: the same content (each event has `mode`: `body` or `face`) plus a comparison
+     of your body marks with the flagged segments (segment start within 30 s before to 60 s after your marked onset).
    Re-opening a video reloads its `.eaf`; a sha256 mismatch is refused, and `Model_*` tiers are regenerated,
    never read back as labels. ELAN (GPL-3.0) is not bundled; only its XML format is written.
 If the ELAN Timeseries Viewer shows no curves (checked on ELAN 7.0):
@@ -115,7 +123,7 @@ If the ELAN Timeseries Viewer shows no curves (checked on ELAN 7.0):
 - No tracks at all: right-click, `Configure Tracks...`, pick `<stem>_signals.csv` under
   `Select a source to configure`, `Select`. On the `Add` tab set `Time Column Index` = 1, leave
   `Continuous Rate` unticked, and add one track per lane: `Track Name`, `Column` (1-based: p_seizure 2,
-  p_smooth5s 3, alarm 4, driver_speed 5, speed_head ... speed_overall 6-13), `(Preferred) Range` >
+  p_smooth5s 3, `alarm` 4, driver_speed 5, speed_head ... speed_overall 6-13), `(Preferred) Range` >
   `Manual Setting` (0-1 for probabilities, 0-1.5 for speeds), `Add`. `Close`, then add them to a panel as above.
 - The CSV is not linked: `Edit` > `Linked Files...`, `Linked Secondary Files`, `Add...`, pick the CSV, `Apply`.
 
@@ -145,8 +153,8 @@ Only use self-recorded or public clips. Other people's videos need their consent
    pip install torch --index-url https://download.pytorch.org/whl/cpu   :: only needed to convert VSViG once
    python scripts\fetch_models.py
    ```
-   Without torch, VSViG is reported as skipped and the rest still installs; add `--skip-vsvig` for
-   Detector A only.
+   (The conversion also needs `onnx`, which `requirements-demo.txt` installs.) Without torch, VSViG is
+   reported as skipped and the rest still installs; add `--skip-vsvig` for Detector A only.
    This fills rtmlib's cache with the pose models (`%USERPROFILE%\.cache\rtmlib`), downloads VSViG-base from
    github.com/xuyankun/VSViG and converts it to `models\vsvig_base.xml/.bin` (only if missing or stale), and
    downloads Detector A (`models\detector_a_all.txt/.json`, plus the body-only `detector_a_body.txt/.json`) from

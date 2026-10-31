@@ -10,7 +10,7 @@ Data: MCEC_Seizure (CC BY 4.0), skeletons only.
   (Detector A's 95 minus `lhand_fine4`, `rhand_fine4`, `npers4`, `has_subject4`).
   The subject scale comes from the box around the visible joints.
 * The preregistered threshold rule gave **0.95**, the same as full Detector A.
-* Alarm rule: 5 s trailing mean, at least 3 s above the threshold, events merged when the gap is under 30 s.
+* Flagging rule: 5 s trailing mean, at least 3 s above the threshold, events merged when the gap is under 30 s.
   Nothing was tuned on MCEC.
 
 ## Reference: A-body vs full Detector A on VSViG LOPO (33 seizures, 3.73 interictal h, nested threshold 0.95 in every fold)
@@ -22,7 +22,7 @@ Data: MCEC_Seizure (CC BY 4.0), skeletons only.
 | A-body | onset window | 26/33 | 0.62–0.89 | 14 (3.75/h) | 12 s | 0.75 |
 
 **Dropping the hand and detector features costs almost nothing on VSViG:**
-the same detections, slightly fewer false alarms, and an AUROC 0.03 lower.
+the same detections, slightly fewer false-positive flags, and an AUROC 0.03 lower.
 So any loss on MCEC comes from the site shift, the keypoint model and the labels, not from removing hands.
 
 ## MCEC (5 seizures / 4 patients; 147 non-seizure runs, 3,174 s = 0.88 h)
@@ -32,7 +32,7 @@ The onset is the first frame of the seizure folder.
 | | Result |
 |---|---|
 | Seizures detected | **2/5** (Wilson 95% 0.12–0.77). Excluding 4613, which is 2 s long and undetectable by design: 2/4 |
-| False alarms | **10 in 0.88 h = 11.3/h** (Poisson 95% 5.4–20.9) |
+| False-positive flags | **10 in 0.88 h = 11.3/h** (Poisson 95% 5.4–20.9) |
 | Delays from MCEC onset | 4563: 43 s; 4600: 11 s |
 | Pooled per-second AUROC | **0.52** (record bootstrap 95% 0.35–0.74). Excluding 4613: 0.52 |
 | Detector A code window | Same: 2/5, 10 FA |
@@ -56,8 +56,8 @@ Aspect-ratio sensitivity (preregistered):
 The result does not depend on the aspect assumption.
 
 ## Exploratory (not preregistered, labelled as such)
-* **Warm-up false alarms.** 5 of the 10 false alarms start in the first 10 s of a non-seizure run.
-  This is the warm-up effect noted as a confound. Counting only alarms that start 10 s or more into a run
+* **Warm-up false-positive flags.** 5 of the 10 false-positive flags start in the first 10 s of a non-seizure run.
+  This is the warm-up effect noted as a confound. Counting only flagged segments that start 10 s or more into a run
   gives 5 FA in about 0.57 h, roughly 9/h, which is still above VSViG's 3.75/h.
 * **Feature medians.** Overall speed 4 s mean, in box diagonals per second:
 
@@ -98,4 +98,4 @@ With 4 patients and 5 seizures this is anecdotal, but it points one way.
 
   These cannot be separated without video.
 * **What would answer it:** a larger, video-level external set such as the IEEE DataPort 50-patient set,
-  ideally with keypoints re-extracted by our own RTMPose pipeline.
+  ideally with keypoints re-extracted by this project's RTMPose pipeline.
