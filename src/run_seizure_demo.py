@@ -11,7 +11,7 @@ Optional: per-second iEEG probabilities from a CSV (columns t,p) replayed alongs
 fused with noisy-OR. Such replays are UNPAIRED (different patients) unless stated.
 
 Layout: video on the left; on the right a panel with the smoothed Detector A probability
-(dashed alarm threshold, shaded alarm seconds, current value), the top drivers of the score
+(dashed score threshold, shaded flagged seconds, current value), the top drivers of the score
 (LightGBM pred_contrib once per second, grouped by body region and feature family, averaged
 over 5 s), plain per-region motion graphs, and a greyed-out
 EEG lane reserved for a future paired EEG stream.
@@ -19,7 +19,7 @@ EEG lane reserved for a future paired EEG stream.
 Keys: q quit, space pause, f fast-forward toggle (no real-time pacing), r replay from the start,
 o open another video (file picker), m face tracking on/off, h show/hide the key legend (footer strip). When the video ends the window stays open on the last frame
 (graphs and score strip visible): r replay, o open another video, q quit. --loop restarts by itself.
-A replay resets all causal state (buffers, smoothing, alarms, explanations, graphs).
+A replay resets all causal state (buffers, smoothing, flagged segments, explanations, graphs).
 
 Optional face stage (--face, or the m key at run time; off by default): MediaPipe Face Landmarker on
 a head crop of the tracked subject (src/face_estimator.py). It adds the face mesh to the video and
@@ -45,7 +45,7 @@ WIN_S = 12.0          # seconds of keypoint history kept for features
 CHART_S = 90.0        # seconds shown on the chart
 WIN_NAME = "semi-signals | seizure detection"
 MIN_VALID_B = 0.5    # Detector B needs the tracked subject in at least half of its 5 s window, else no score
-RENDER_VERSION = 2   # bump when the rendered overlay changes, so saved renders are redone (review_video)
+RENDER_VERSION = 3   # bump when the rendered overlay changes, so saved renders are redone (review_video)
 
 
 def parse_args(argv=None):
@@ -160,13 +160,11 @@ def draw_chart(w, h, now, series, thr, marks, alarm, span=CHART_S):
         cv2.putText(img, name, (lx, h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, col, 1)
         lx += 18 + 9 * len(name)
     cv2.putText(img, f"t = {t_disp:6.1f} s", (w - 130, h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
-    if alarm:
-        cv2.rectangle(img, (0, 0), (w - 1, h - 1), (0, 0, 255), 4)
     return img
 
 
 class CausalScorer:
-    """All per-pass causal state: keypoint buffers, Detector A history and smoothing, alarm state,
+    """All per-pass causal state: keypoint buffers, Detector A history and smoothing, flagged-segment state,
     explanation history and the motion-graph series. reset() returns it to the state of a fresh
     start, so a replay of the same video gives identical scores."""
 
@@ -626,8 +624,6 @@ def run_pass(a, M, video, labels, n_pass):
         if fst.on:
             lines.append((mode_label(True), (0, 220, 255)))
         overlay_lines(vis, lines, (12, 10), 20)
-        if alarm_a or alarm_b:
-            put_text(vis, "SEIZURE ALERT", (disp_w - 16, 14), 28, (0, 0, 255), bold=True, anchor="rt")
         if inf_times:
             overlay_lines(vis, [(f"analysis {1.0 / max(1e-3, np.mean(inf_times)):.0f} frames/s ({device})", (210, 210, 210))],
                           (12, disp_h - 30), 14, bold=False)

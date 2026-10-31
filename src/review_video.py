@@ -8,7 +8,7 @@ Step 1 (process): runs the seizure viewer over the file (pose + Detector A + dri
   <stem>_semisignals.mp4 (rendered overlay), <stem>_scores.csv and <stem>_semisignals.json (what the
   render was made with) next to the video. Skipped when all three exist, are newer than the video and
   match the current settings and overlay version (use --reprocess to redo).
-Step 2 (review): plays the rendered video in sync, with a timeline of model alarms and your marks.
+Step 2 (review): plays the rendered video in sync, with a timeline of flagged segments and your marks.
   Keys:  space pause | j / l  back / forward 5 s | o clinical onset (new event) | e clinical end
          g EEG onset (optional) | t seizure type (pick list) | n note (attached to the event under the
          playhead, else a timed note) | x exclude span start/stop | u undo last mark | s save now
@@ -405,7 +405,7 @@ def per_second(rows):
 
 
 def compare(events, alarms, pre=30.0, post=60.0):
-    """Per human-marked body event: first model alarm within [onset-30 s, onset+60 s] and its delay.
+    """Per human-marked body event: first flagged segment within [onset-30 s, onset+60 s] and its delay.
     Face events are not compared (Detector A is a body-motion model)."""
     events = A.events_of(events, "body")
     res = []
@@ -417,7 +417,7 @@ def compare(events, alarms, pre=30.0, post=60.0):
                         delay_s=round(hit[0]["start_s"] - on, 1) if hit else None))
     used = {id(al) for al in alarms for e in events if e.get("clinical_onset_s") is not None
             and e["clinical_onset_s"] - pre <= al["start_s"] <= e["clinical_onset_s"] + post}
-    return dict(window="alarm start within 30 s before to 60 s after marked clinical onset", events=res,
+    return dict(window="flagged segment start within 30 s before to 60 s after marked clinical onset", events=res,
                 alarms_outside_marked_events=sum(id(al) not in used for al in alarms))
 
 
@@ -476,7 +476,7 @@ def draw_bar(w, t, dur, ann, alarms, open_excl, status, mode="body"):
             info += f" type '{ev.get('seizure_type') or '-'}'"
     if open_excl is not None:
         info += "  |  exclude open"
-    key = "red: model alarms   green: body marks" + ("   violet: face marks" if mode != "body" else "")
+    key = "red: flagged segments   green: body marks" + ("   violet: face marks" if mode != "body" else "")
     kw = text_width(key, 13)
     room = w - 2 * L - kw - 24
     if room > 200:
@@ -589,7 +589,7 @@ def main(argv=None):
     def report():
         for c in ann["comparison"]["events"] if ann.get("comparison") else []:
             print(f"[review] event {c['event']}: onset {A.hms(c['clinical_onset_s'])} -> "
-                  + (f"alarm at {A.hms(c['alarm_start_s'])} (delay {c['delay_s']:+.1f} s)" if c["detected"] else "no alarm in window"))
+                  + (f"flagged at {A.hms(c['alarm_start_s'])} (delay {c['delay_s']:+.1f} s)" if c["detected"] else "nothing flagged in window"))
 
     def handle(key, t, text=None):
         """Apply one mark; returns True if the annotation changed (then it is autosaved)."""

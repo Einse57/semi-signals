@@ -229,7 +229,7 @@ Model weights are not in this repository. Details: [docs/SEIZURE_DETECTION.md](d
 - Google, MediaPipe Face Landmarker (BlazeFace, Face Mesh V2, Blendshape V2), Apache-2.0. [ai.google.dev/edge/mediapipe](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker); Kartynnik et al., *"Real-time Facial Surface Geometry from Monocular Video on Mobile GPUs"*, 2019. [arXiv:1907.06724](https://arxiv.org/abs/1907.06724)
 
 **What this project can do today:**
-- Rule-based alerts on motion thresholds (e.g., sustained bilateral tremor)
+- Rule-based flags on motion thresholds (e.g., sustained bilateral tremor)
 - L/R asymmetry detection as an indicator
 - Motion time-series recording for offline analysis
 - Clip export on motion spikes for review

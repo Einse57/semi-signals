@@ -80,13 +80,13 @@ def draw_marks(img, ax, top, bot, marks, label=True):
 
 
 def draw_prob_strip(w, h, now, span, tA, pA, pAs, alarm, thr, marks, extra=(), alarm_now=False):
-    """tA/pA/pAs/alarm: per-second history (alarm = bool per second, covering [t-1, t))."""
+    """tA/pA/pAs/alarm: per-second history (alarm = flagged, bool per second, covering [t-1, t))."""
     img = np.full((h, w, 3), 22, np.uint8)
     ax = Axis(w, now, span)
     T, B = 24, 20
     ph = h - T - B
     Y = lambda v: int(T + (1 - min(max(v, 0.0), 1.0)) * ph)
-    # alarm shading
+    # shading of flagged seconds
     for t, a in zip(tA, alarm):
         if a and t >= ax.t0:
             x0, x1 = max(ax.x(t - 1), L_M), ax.x(t)
@@ -96,7 +96,7 @@ def draw_prob_strip(w, h, now, span, tA, pA, pAs, alarm, thr, marks, extra=(), a
         put_text(img, f"{v:.1f}", (L_M - 6, Y(v)), FS, TXT, anchor="rm")
     if thr is not None:
         dashed_hline(img, L_M, w - R_M, Y(thr), (80, 80, 255))
-        put_text(img, f"alarm {thr:.2f}", (w - R_M + 4, Y(thr)), FS, (80, 80, 255), anchor="lm")
+        put_text(img, f"{thr:.2f}", (w - R_M + 4, Y(thr)), FS, (80, 80, 255), anchor="lm")
     draw_marks(img, ax, T, T + ph, marks)
     for name, col, ts, vs in extra:
         _polyline(img, ax, Y, ts, vs, col, 1)
@@ -114,11 +114,7 @@ def draw_prob_strip(w, h, now, span, tA, pA, pAs, alarm, thr, marks, extra=(), a
     col = (60, 60, 255) if alarm_now else (0, 255, 0)
     put_text(img, "now", (w - R_M + 6, T + 22), FS, TXT)
     put_text(img, "--" if not np.isfinite(cur) else f"{cur:.2f}", (w - R_M + 6, T + 54), 28, col, bold=True)
-    if alarm_now:
-        put_text(img, "ALARM", (w - R_M + 6, T + 78), 16, (60, 60, 255), bold=True)
     put_text(img, f"t = {now:.0f} s", (w - R_M + 6, h - 9), FS, TXT, anchor="lm")
-    if alarm_now:
-        cv2.rectangle(img, (0, 0), (w - 1, h - 1), (0, 0, 255), 2)
     return img
 
 

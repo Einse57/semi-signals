@@ -6,7 +6,7 @@ Per video <stem>.<ext>, written next to it:
                           once labels/face.json has a term list, a Face_term child.
                           Model tiers: Model_alarm (+ Model_drivers child).
                           Provenance in HEADER PROPERTY elements.
-  <stem>_signals.csv      per-second model probability, alarm state and region speeds
+  <stem>_signals.csv      per-second model probability, flagged state and region speeds
   <stem>_tsconf.xml       ELAN Timeseries Viewer track setup for the CSV
   <stem>.pfsx             ELAN per-document preferences: which tracks go in which viewer panel
                           (only written if absent; ELAN keeps the user's layout there)
@@ -110,7 +110,7 @@ def new_annotation(video, fps: float, duration_s: float, annotator: str = "", pa
 
 
 def model_section(model_id: str, threshold: float, alarms: list[dict], per_second: list[dict]) -> dict:
-    """alarms: [{start_s, end_s, peak_p, drivers}], per_second: rows for the signals CSV."""
+    """alarms: flagged segments [{start_s, end_s, peak_p, drivers}], per_second: rows for the signals CSV."""
     return dict(detector="A (pose features + LightGBM)", model_id=model_id, threshold=threshold,
                 alarm_rule="smooth 5 s; alarm when >= threshold for >= 3 s; merge alarms < 30 s apart",
                 alarms=alarms, per_second=per_second)
@@ -118,7 +118,7 @@ def model_section(model_id: str, threshold: float, alarms: list[dict], per_secon
 
 def alarms_from_seconds(rows: list[dict], merge_gap: float = 30.0) -> list[dict]:
     """rows: per-second dicts with t (second index), p_smooth, alarm (0/1), drivers (str).
-    Returns merged alarm spans (alarm seconds covering [t, t+1))."""
+    Returns merged flagged segments (flagged seconds covering [t, t+1))."""
     spans = []
     for r in rows:
         if not r.get("alarm"):
@@ -357,9 +357,9 @@ def write_signals(rows: list[dict], video) -> Path:
 
 
 SPEED_MAX = 1.5   # fixed y range for speed lanes (ELAN's CSV loader ignores detect-range); clips above it
-_TRACKS = [("p_smooth5s", "Detector A 5 s smoothed probability (alarm threshold in header)", "p", 0, 1, "0,220,0"),
+_TRACKS = [("p_smooth5s", "Detector A 5 s smoothed probability (score threshold in header)", "p", 0, 1, "0,220,0"),
            ("p_seizure", "Detector A raw per-second probability", "p", 0, 1, "0,110,0"),
-           ("alarm", "Detector A alarm state (0/1)", "", 0, 1, "255,40,40"),
+           ("alarm", "Detector A flagged state (0/1)", "", 0, 1, "255,40,40"),
            ("driver_speed", "mean speed of the top-driver regions (gap when none)", "body/s", 0, SPEED_MAX, "255,190,0")] + \
           [(f"speed_{r}", f"{r} speed", "body/s", 0, SPEED_MAX, c) for r, c in
            zip(REGIONS, ("255,255,0", "0,200,0", "0,0,200", "128,255,0", "100,100,255", "0,200,0", "0,0,200", "180,180,180"))]

@@ -9,29 +9,29 @@ Keypoints: `src/batch_extract.py` (RTMPose via rtmlib, 6 samples/s). Code: `pyth
 | measure | value |
 |---|---|
 | seizures detected | 29/33 = 0.88 (Wilson 95% 0.73-0.95; patient bootstrap 0.77-0.97) |
-| false alarms | 16 in 3.73 interictal h = 4.3/h (Poisson 95% 2.5-7.0; patient bootstrap 1.5-6.8) |
+| false-positive flags | 16 in 3.73 interictal h = 4.3/h (Poisson 95% 2.5-7.0; patient bootstrap 1.5-6.8) |
 | delay vs clinical onset | median 18 s (IQR 5 to 34) |
 | delay vs EEG onset | median 28 s (IQR 13 to 50) |
 | per-second AUROC, held-out patient | mean 0.78 (range 0.69-0.92) |
 
-Detection window for the table above (the scoring code's window): an alarm counts if it overlaps
+Detection window for the table above (the scoring code's window): a flagged segment counts if it overlaps
 [clinical onset - 30 s, min(clinical onset + 120 s, recording end) + 60 s]. With the stricter onset-only window
 [clinical onset - 30 s, clinical onset + 60 s] it is **26/33** (Wilson 95% 0.62-0.89), median delay 13 s vs
-clinical onset, with the same 4.3 false alarms/h (see `docs/mcec_crosssite_results.md`). Alarm rule: 5 s trailing
-mean at or above 0.95 for at least 3 s, alarms under 30 s apart merged.
+clinical onset, with the same 4.3 false-positive flags/h (see `docs/mcec_crosssite_results.md`). Flagging rule: 5 s trailing
+mean at or above 0.95 for at least 3 s, flagged segments under 30 s apart merged.
 
-Secondary rule (fixed threshold 0.5): 33/33 detected (Wilson 0.90-1.00), but 16.4 false alarms/h
+Secondary rule (fixed threshold 0.5): 33/33 detected (Wilson 0.90-1.00), but 16.4 false-positive flags/h
 (Poisson 12.5-21.0); median delay 1 s vs clinical onset.
 
 Per-patient tables: `results/detector_a/RESULTS.md` (generated, kept out of the repo with the data).
 
 ## How to read this
 
-* In every outer fold, no threshold on the 0.05 grid reached the inner-fold target of 1 false alarm/h,
+* In every outer fold, no threshold on the 0.05 grid reached the inner-fold target of 1 false-positive flag/h,
   so the preregistered fallback (0.95) applied everywhere. The final all-patient model also uses 0.95.
   The 1/h target is not met on held-out patients (4.3/h).
 * Interictal time is small (3.73 h) and concentrated in three patients (pat01 1.17 h, pat02 0.92 h,
-  pat04 0.50 h); 11 of 16 false alarms come from pat01 and pat02. The FA/h estimate is therefore wide,
+  pat04 0.50 h); 11 of 16 false-positive flags come from pat01 and pat02. The FA/h estimate is therefore wide,
   and most patients contribute almost no interictal time.
 * Many videos start shortly before onset, so the 30 s pre-onset tolerance makes early detections easy to
   count. Recall on this set is optimistic compared with continuous monitoring.

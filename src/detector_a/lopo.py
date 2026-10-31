@@ -128,11 +128,11 @@ def summarize(rows, aucs, out):
         de = np.array([r["delay_eeg"] for r in R if r["tp"]], float)
         lines.append(f"## rule={rule}\n")
         lines.append(f"- seizures detected: {tp}/{n} = {tp/n:.2f} (Wilson 95% {lo:.2f}-{hi:.2f}; patient bootstrap {np.percentile(bs_rec,2.5):.2f}-{np.percentile(bs_rec,97.5):.2f})")
-        lines.append(f"- false alarms: {fa} in {h:.2f} interictal h = {fa/h:.2f}/h (Poisson 95% {flo:.2f}-{fhi:.2f}; patient bootstrap {np.percentile(bs_fa,2.5):.2f}-{np.percentile(bs_fa,97.5):.2f})")
+        lines.append(f"- false-positive flags: {fa} in {h:.2f} interictal h = {fa/h:.2f}/h (Poisson 95% {flo:.2f}-{fhi:.2f}; patient bootstrap {np.percentile(bs_fa,2.5):.2f}-{np.percentile(bs_fa,97.5):.2f})")
         if len(dc):
             lines.append(f"- delay vs clinical onset: median {np.median(dc):.0f} s (IQR {np.percentile(dc,25):.0f} to {np.percentile(dc,75):.0f})")
             lines.append(f"- delay vs EEG onset: median {np.median(de):.0f} s (IQR {np.percentile(de,25):.0f} to {np.percentile(de,75):.0f})")
-        lines.append("\n| patient | thr | detected | false alarms | interictal h |\n|---|---|---|---|---|")
+        lines.append("\n| patient | thr | detected | false-positive flags | interictal h |\n|---|---|---|---|---|")
         for p in pats:
             lines.append(f"| {p} | {by[p][0]['thr']} | {sum(r['tp'] for r in by[p])}/{sum(r['n_sz'] for r in by[p])} | {sum(r['fa'] for r in by[p])} | {sum(r['interictal_h'] for r in by[p]):.2f} |")
         lines.append("")
