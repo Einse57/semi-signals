@@ -155,8 +155,7 @@ Only use self-recorded or public clips. Other people's videos need their consent
    ```
    (The conversion also needs `onnx`, which `requirements-demo.txt` installs.) Without torch, VSViG is
    reported as skipped and the rest still installs; add `--skip-vsvig` for Detector A only.
-   This fills rtmlib's cache with the pose models (`%USERPROFILE%\.cache
-tmlib`), downloads VSViG-base from
+   This fills rtmlib's cache with the pose models (`%USERPROFILE%\.cache\rtmlib`), downloads VSViG-base from
    github.com/xuyankun/VSViG and converts it to `models\vsvig_base.xml/.bin` (only if missing or stale), and
    downloads Detector A (`models\detector_a_all.txt/.json`, plus the body-only `detector_a_body.txt/.json`) from
    https://huggingface.co/Einse57/semi-signals-detector-a at a pinned commit, all sha256-checked; hashes go in
