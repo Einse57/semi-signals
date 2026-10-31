@@ -145,6 +145,8 @@ Only use self-recorded or public clips. Other people's videos need their consent
    pip install torch --index-url https://download.pytorch.org/whl/cpu   :: only needed to convert VSViG once
    python scripts\fetch_models.py
    ```
+   Without torch, VSViG is reported as skipped and the rest still installs; add `--skip-vsvig` for
+   Detector A only.
    This fills rtmlib's cache with the pose models (`%USERPROFILE%\.cache\rtmlib`), downloads VSViG-base from
    github.com/xuyankun/VSViG and converts it to `models\vsvig_base.xml/.bin` (only if missing or stale), and
    downloads Detector A (`models\detector_a_all.txt/.json`, plus the body-only `detector_a_body.txt/.json`) from
@@ -172,6 +174,7 @@ Only use self-recorded or public clips. Other people's videos need their consent
    `h` show/hide the key legend.
    Options: `--loop` to repeat the video, `--device cpu` to force CPU, `--no-hands`, `--start 3500` to jump into a long video,
    `--save out.mp4` to record the rendered output, `--log scores.csv` for per-second scores,
+   `--headless --fast` to run without a window and without real-time pacing (with `--save` or `--log`),
    `--ieeg probs.csv --ieeg-offset 0` for an iEEG replay.
 
 ## Licences of loaded code, models and data
