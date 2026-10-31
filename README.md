@@ -122,20 +122,20 @@ semi-signals also includes a video-only seizure detector built on the semi-signa
 live viewer and an annotation tool:
 
 - **Detector A**: causal per-second pose features (region speeds, 0.5-1.5 Hz and 1.5-3 Hz rhythm, visibility,
-  people in view) and a LightGBM classifier; alarm when the 5 s mean stays at or above 0.95 for 3 s.
+  people in view) and a LightGBM classifier; a segment is flagged when the 5 s mean stays at or above 0.95 for 3 s.
   Trained and evaluated on the [VSViG](https://github.com/xuyankun/VSViG) WU-SAHZU EMU videos
   (Apache-2.0; Xu, Sawan et al., ECCV 2024), 14 patients, 35 recordings.
 - **Detector B (reference)**: the released VSViG-base model (vendored code in `third_party/vsvig`, Apache-2.0).
-- **Live viewer**: probability strip with alarm shading, top drivers from LightGBM `pred_contrib`, and per-region
+- **Live viewer**: probability strip with flagged seconds shaded, top drivers from LightGBM `pred_contrib`, and per-region
   motion graphs; review your own video and save ELAN-compatible `.eaf` annotations.
 - **Measurements** (each preregistered before scoring, see `docs/*_preregistration.md`):
   leave-one-patient-out on VSViG, 29/33 seizures detected with the scoring code's window (clinical onset - 30 s
-  to min(onset + 120 s, recording end) + 60 s; 26/33 with an onset-only -30/+60 s window) at 4.3 false alarms/h.
+  to min(onset + 120 s, recording end) + 60 s; 26/33 with an onset-only -30/+60 s window) at 4.3 false-positive flags/h.
   On a second site (MCEC_Seizure, 4 patients, skeletons only) a frozen body-only model caught 2/5 at 11.3/h,
   with chance-level per-second ranking: [docs/mcec_crosssite_results.md](docs/mcec_crosssite_results.md).
 
-![Live viewer: pose overlay, Detector A probability strip in alarm, top drivers and per-region motion](docs/img/live_detector_a.png)
-*Live viewer on the public sample clip `pat10/Sz2P` (source video already pixelated): pose overlay, Detector A alarm and drivers.*
+![Live viewer: pose overlay, Detector A probability strip with flagged seconds shaded, top drivers and per-region motion](docs/img/live_detector_a.png)
+*Live viewer on the public sample clip `pat10/Sz2P` (source video already pixelated): pose overlay, Detector A probability and drivers.*
 
 ![Annotation tool in face mode with the de-identification dialog: Fill selected, Landmarker MediaPipe or OpenVINO](docs/img/annotation_face_fill.png)
 *Annotation tool, face mode, on a Fill export of an actor clip: the de-identification dialog with the Landmarker picker.*
