@@ -15,3 +15,7 @@ Models and data used at run time are not included and keep their own licences:
   rtmlib, RTMPose and YOLOX (Apache-2.0); the YOLOX-tiny checkpoint was trained with Human-Art
   (non-commercial licence) and the RTMPose body7/hand5 checkpoints include research-only datasets;
   MCEC_Seizure skeletons (CC BY 4.0, Kuang et al., 2024).
+  Optional: MediaPipe and the MediaPipe Face Landmarker model bundle (BlazeFace short-range, Face Mesh V2,
+  Blendshape V2), Google, Apache-2.0, https://github.com/google-ai-edge/mediapipe. The model cards
+  describe AR/entertainment use and state the models are not intended for life-critical decisions;
+  see docs/FACE_LANDMARKS.md.

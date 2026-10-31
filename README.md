@@ -22,9 +22,10 @@ python -m src.run_live --list-cams              # probe available cameras
 python -m src.run_live --no-hands               # body only (~40 FPS vs ~25-30)
 python -m src.run_live --det-score 0.6          # detection confidence threshold
 python -m src.run_live --det-interval 10        # detect every N frames
+python -m src.run_live --face                   # optional MediaPipe face landmarks (see below)
 ```
 
-**Runtime keys:** `q` quit · `h` toggle hands · `c` cycle camera
+**Runtime keys:** `q` quit · `h` toggle hands · `m` toggle face · `c` cycle camera
 
 ## Models
 
@@ -35,6 +36,12 @@ All ONNX checkpoints are auto-downloaded by [rtmlib](https://github.com/Tau-J/rt
 | [YOLOX-tiny](https://arxiv.org/abs/2107.08430) | Person detection | 416×416 | Bounding boxes |
 | [RTMPose-m](https://arxiv.org/abs/2303.07399) body | Body pose | 256×192 crop | 17 keypoints (COCO) |
 | [RTMPose-m](https://arxiv.org/abs/2303.07399) hand | Hand pose | 256×256 crop | 21 keypoints × 2 hands |
+| [MediaPipe Face Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker) (optional, `--face`) | Face mesh + blendshapes | head crop from the body keypoints | 478 3D landmarks, 52 blendshapes |
+
+The face stage is off by default. It needs `pip install mediapipe` and `python scripts/fetch_models.py --face`
+(the model file is downloaded and sha256-checked, not stored here). MediaPipe runs on its own CPU runtime
+(TFLite + XNNPACK), also when the other models run on the iGPU. Output schema, face regions and model card
+notes: [docs/FACE_LANDMARKS.md](docs/FACE_LANDMARKS.md).
 
 ## Performance
 
@@ -116,6 +123,7 @@ Model weights are not in this repository. Details: [docs/SEIZURE_DETECTION.md](d
 - Xu et al., *"VSViG: Real-time Video-based Seizure Detection via Skeleton-based Spatiotemporal ViG"*, ECCV 2024. [arXiv:2311.14775](https://arxiv.org/abs/2311.14775)
 - Jiang et al., *"RTMPose: Real-Time Multi-Person Pose Estimation based on MMPose"*, 2023. [arXiv:2303.07399](https://arxiv.org/abs/2303.07399)
 - Ge et al., *"YOLOX: Exceeding YOLO Series in 2021"*. [arXiv:2107.08430](https://arxiv.org/abs/2107.08430)
+- Google, MediaPipe Face Landmarker (BlazeFace, Face Mesh V2, Blendshape V2), Apache-2.0. [ai.google.dev/edge/mediapipe](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker); Kartynnik et al., *"Real-time Facial Surface Geometry from Monocular Video on Mobile GPUs"*, 2019. [arXiv:1907.06724](https://arxiv.org/abs/1907.06724)
 
 **What this project can do today:**
 - Rule-based alerts on motion thresholds (e.g., sustained bilateral tremor)

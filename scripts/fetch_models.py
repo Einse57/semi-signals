@@ -6,6 +6,7 @@
   python scripts/fetch_models.py --skip-vsvig --force
   python scripts/fetch_models.py --clips pat12/Sz1P,pat12/Sz2P   # other sample clips (or --clips all, ~27 GB)
   python scripts/fetch_models.py --skip-data           # models only
+  python scripts/fetch_models.py --face --skip-data    # also the optional MediaPipe face model
 
 What it does:
 1. Pose models (YOLOX-tiny, RTMPose-m body7 and hand5): downloads them into rtmlib's own cache
@@ -21,6 +22,9 @@ What it does:
 4. Sample data: `Label.xlsx` and a few clips from the Hugging Face dataset `xuyankun/WU-SAHZU-EMU-Video`
    (Apache-2.0, pinned commit) into --data-dir, without the dataset's `dataset/` prefix
    (e.g. `data/Label.xlsx`, `data/pat10/Sz2P.mp4`).
+
+5. Optional (--face): MediaPipe Face Landmarker bundle `face_landmarker.task` (Google, Apache-2.0)
+   from storage.googleapis.com into --models-dir, sha256-checked. Only the optional face stage uses it.
 
 Hashes of everything in --models-dir are recorded in `<models-dir>/MANIFEST.json` (sample data under "data").
 Works on Windows, macOS and Linux. Model files are not part of the repository.
@@ -81,6 +85,14 @@ Attribution
   rtmlib, RTMPose, YOLOX: Apache-2.0. Note: the YOLOX-tiny checkpoint was trained with Human-Art
     (non-commercial licence) and the RTMPose body7/hand5 checkpoints include research-only datasets.
   Research use only, not a medical device."""
+FACE_CREDIT = """  MediaPipe Face Landmarker (BlazeFace short-range, Face Mesh V2, Blendshape V2): Google,
+    Apache License 2.0. https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker
+    Model cards: intended for AR/entertainment; not for life-critical decisions."""
+
+FACE_FILE = "face_landmarker.task"
+FACE_URL = ("https://storage.googleapis.com/mediapipe-models/face_landmarker/"
+            "face_landmarker/float16/1/face_landmarker.task")
+FACE_SHA256 = "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff"
 
 
 def sha256(p: Path) -> str:
@@ -342,6 +354,29 @@ def step_data(a, man: Manifest, status):
     print(DATA_CREDIT)
 
 
+# ── 5. optional face model ───────────────────────────────────
+def step_face(a, md: Path, man: Manifest, status):
+    dst = md / FACE_FILE
+    print(f"[5/5] MediaPipe Face Landmarker (optional) -> {dst}")
+    if ok_file(dst, FACE_SHA256) and not (a.force and not a.offline):
+        print(f"    ok  {FACE_FILE}")
+    elif a.offline:
+        status["face"] = f"FAILED: {FACE_FILE} missing or sha256 mismatch"; print("    " + status["face"]); return
+    else:
+        try:
+            download(FACE_URL, dst)
+        except OSError as e:
+            status["face"] = f"FAILED: download ({type(e).__name__})"; print("    " + status["face"]); return
+        h = sha256(dst)
+        if FACE_SHA256 is not None and h != FACE_SHA256:
+            dst.unlink()
+            status["face"] = f"FAILED: {FACE_FILE} sha256 mismatch ({h[:12]}...)"; print("    " + status["face"]); return
+        print(f"    ok  {FACE_FILE} (downloaded, " + ("sha256 verified)" if FACE_SHA256 else f"sha256 {h}, not pinned yet)"))
+    man.set(FACE_FILE, sha256=FACE_SHA256 or sha256(dst), source=FACE_URL, license="Apache-2.0")
+    status["face"] = "ok"
+    print(FACE_CREDIT)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--models-dir", default=str(ROOT / "models"))
@@ -353,6 +388,7 @@ def main(argv=None):
     ap.add_argument("--clips", default=DEFAULT_CLIPS,
                     help=f"sample clips, comma-separated patNN/SzNP (default {DEFAULT_CLIPS}); 'all' for every video (~27 GB)")
     ap.add_argument("--data-dir", default=str(ROOT / "data"), help="where Label.xlsx and the clips go (default ./data)")
+    ap.add_argument("--face", action="store_true", help="also fetch the optional MediaPipe face model")
     a = ap.parse_args(argv)
     md = Path(a.models_dir).expanduser().resolve(); md.mkdir(parents=True, exist_ok=True)
     man = Manifest(md / "MANIFEST.json")
@@ -367,6 +403,8 @@ def main(argv=None):
         status["data"] = "skipped"
     else:
         step_data(a, man, status)
+    if a.face:
+        step_face(a, md, man, status)
     man.save()
     print("\nSummary (models dir: %s)" % md)
     for k, v in status.items():

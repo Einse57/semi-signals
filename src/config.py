@@ -223,7 +223,20 @@ REGION_COLORS: dict[str, tuple[int, int, int]] = {
     "l_leg":   (0, 200, 0),      # green
     "r_leg":   (200, 0, 0),      # blue
     "overall": (180, 180, 180),  # dim grey
+    # optional face stage (--face): subject's left green, right blue, as above
+    "mouth":   (0, 165, 255),    # orange
+    "l_eye":   (0, 200, 0),
+    "r_eye":   (200, 0, 0),
+    "l_face":  (0, 200, 0),
+    "r_face":  (200, 0, 0),
 }
+
+# Face motion charts (shown only with --face)
+FACE_CHART_GROUPS: list[tuple[str, list[str]]] = [
+    ("Mouth", ["mouth"]),
+    ("Eyes", ["l_eye", "r_eye"]),
+    ("Face L/R", ["l_face", "r_face"]),
+]
 
 # ── Chart layout: which regions appear together on each mini-chart ──
 # Each entry: title → list of region keys to overlay.
