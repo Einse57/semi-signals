@@ -16,7 +16,8 @@ What it does:
 2. VSViG-base: downloads `VSViG-base.pth` and `dy_point_order.pt` from the official repository
    (github.com/xuyankun/VSViG, pinned commit), checks sha256, then converts to ONNX and OpenVINO IR
    with `src/export_vsvig.py` only if the IR is missing or was built from different weights.
-   Conversion needs torch (CPU build is enough) and onnx; the live viewer itself does not.
+   Conversion needs torch (CPU build is enough) and onnx; the live viewer itself does not. Without torch
+   the conversion is reported as skipped.
 3. Detector A: downloads from the Hugging Face repo `Einse57/semi-signals-detector-a` with the pinned
    SHA-256s in `src/hf_models.py`,
    or copies a local model given with `--detector-a PATH` (its `.json` sidecar is taken from next to it).
@@ -38,7 +39,7 @@ Hashes of everything in --models-dir are recorded in `<models-dir>/MANIFEST.json
 Works on Windows, macOS and Linux. Model files are not part of the repository.
 """
 from __future__ import annotations
-import argparse, ast, hashlib, json, os, shutil, subprocess, sys, tempfile, urllib.request
+import argparse, ast, hashlib, importlib.util, json, os, shutil, subprocess, sys, tempfile, urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -208,6 +209,10 @@ def step_vsvig(a, md: Path, man: Manifest, status):
         status["vsvig"] = "ok"; return
     if a.offline:
         status["vsvig"] = "FAILED: OpenVINO IR missing or stale (run without --offline)"; print("    " + status["vsvig"]); return
+    if importlib.util.find_spec("torch") is None:
+        status["vsvig"] = ("skipped: torch not installed (only needed to convert VSViG once; e.g. "
+                           "pip install torch --index-url https://download.pytorch.org/whl/cpu)")
+        print("    " + status["vsvig"]); return
     print("    converting to ONNX + OpenVINO IR with src/export_vsvig.py")
     r = subprocess.run([sys.executable, "-m", "src.export_vsvig", "--weights", str(md / "VSViG-base.pth"),
                         "--out", str(md / VSVIG_IR_STEM)], cwd=ROOT)
