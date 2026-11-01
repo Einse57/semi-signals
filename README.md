@@ -2,15 +2,45 @@
 
 [![Hugging Face | Detector A](https://img.shields.io/badge/Hugging%20Face-Detector%20A-yellow?logo=huggingface)](https://huggingface.co/Einse57/semi-signals-detector-a)
 
-The seizure detector model (Detector A) is on [Hugging Face](https://huggingface.co/Einse57/semi-signals-detector-a).
-The MediaPipe Face Landmarker also runs on OpenVINO (CPU, Arc iGPU and NPU tested on Core Ultra 9 285H):
-[docs/FACE_OPENVINO.md](docs/FACE_OPENVINO.md).
+Real-time body, face and hand keypoints from video, used as a testing ground for seizure-pattern models and for
+measuring how face de-identification trades facial landmarks against identity.
 
-Real-time skeleton-based motion analysis — live body + hand tracking with per-region L/R motion quantification, accelerated via OpenVINO on Intel iGPU.
+> **Research use only. Not a medical device and not a diagnostic.**
 
-Inspired by [VSViG (Xu et al., ECCV 2024)](https://arxiv.org/abs/2311.14775) but extends its input pipeline with 21-keypoint hand tracking and finger-level motion. See [JOINT_MAPPING.md](src/JOINT_MAPPING.md) for a detailed comparison.
+## What it shows
 
-## Quick Start
+### 1. Real-time motion tracking keypoints (body, face, hands)
+Live webcam or video tracking with YOLOX-tiny and RTMPose-m: 17 body keypoints and 21 keypoints per hand,
+with per-region left/right motion and finger-level motion, accelerated with OpenVINO on the Intel iGPU. An
+optional MediaPipe Face Landmarker stage adds 478 face landmarks and 52 blendshapes, and also runs on
+OpenVINO (CPU, Arc iGPU and NPU tested on Core Ultra 9 285H).
+[Quick start](#quick-start) · [Models](#models) · [docs/FACE_LANDMARKS.md](docs/FACE_LANDMARKS.md) ·
+[docs/FACE_OPENVINO.md](docs/FACE_OPENVINO.md) · [VSViG joint mapping](src/JOINT_MAPPING.md)
+
+### 2. A testing ground for seizure-pattern models on motion keypoints
+Models that read the keypoint stream run side by side in a live viewer that shows their scores over time,
+the flagged segments and, for Detector A, the features driving each model output. Detector A (pose features
+and LightGBM, on [Hugging Face](https://huggingface.co/Einse57/semi-signals-detector-a)) comes with
+preregistered measurements; the released VSViG-base model runs next to it as a reference. An annotation tool
+writes ELAN-compatible labels for new video.
+[Seizure detection (research)](#seizure-detection-research) · [docs/SEIZURE_DETECTION.md](docs/SEIZURE_DETECTION.md)
+
+![Live viewer: pose overlay, Detector A probability strip with flagged seconds shaded, top drivers and per-region motion](docs/img/live_detector_a.png)
+*Live viewer on the public sample clip `pat10/Sz2P` (source video already pixelated): pose overlay, Detector A probability and drivers.*
+
+### 3. Face de-identification vs facial landmarks
+Face methods (fill, mosaic, blur, landmark warp, GHOST face swap, LivePortrait) are compared on how much face
+motion they keep (landmark and blendshape correlation with the original) against how much identity they keep
+(face-recognition matches). Fill is the shareable default, and every fill export is checked for remaining
+faces before it can be shared.
+[Face de-identification](#face-de-identification) · [Segment export](#segment-export) · [docs/FACE_DEID_TRADEOFF.md](docs/FACE_DEID_TRADEOFF.md)
+
+![GRID clip lwwy7p, two frames: face fill (left) and Gaussian blur (right)](docs/figures/face_deid_grid_lwwy7p_fill_blur.png)
+*GRID clip `lwwy7p` (speaker s14), frames 20 and 45: fill (left, shareable default) and Gaussian blur (right,
+local review only). Frames from the GRID audio-visual speech corpus, Cooke, Barker, Cunningham and Shao (2006),
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); modified. Details: [docs/figures/README.md](docs/figures/README.md).*
+
+## Quick start
 
 ```bash
 python -m venv .venv
@@ -21,7 +51,7 @@ pip install --force-reinstall --no-deps opencv-python
 python -m src.run_live
 ```
 
-On Windows, `start.cmd` does the same setup for you (see [Seizure detection](#seizure-detection-research)).
+On Windows, `start.cmd` does the same setup for you (see [Launcher](#launcher-double-click-startcmd-or-run-startps1)).
 `requirements.txt` is the larger development set (install torch first, see its header).
 
 ### CLI Options
@@ -58,7 +88,7 @@ pose) or `detect` (find, crop and align the face).
 
 Optional OpenVINO face backend (`--face-backend openvino --face-device CPU|GPU|NPU|AUTO`; MediaPipe is the default): [docs/FACE_OPENVINO.md](docs/FACE_OPENVINO.md).
 
-## Performance
+## Frame rates
 
 Tested on Intel Core Ultra 7 165U (Meteor Lake) — Xe-LPG iGPU, AI Boost NPU 3720.
 
@@ -70,56 +100,11 @@ Tested on Intel Core Ultra 7 165U (Meteor Lake) — Xe-LPG iGPU, AI Boost NPU 37
 
 OpenVINO targets the iGPU via a monkey-patch in `config.py` (rtmlib's built-in OpenVINO backend hardcodes CPU). The NPU compiles all models but is slower — YOLOX ~9× slower, RTMPose ~1.2× slower.
 
-## Project Layout
-
-```
-semi-signals/
-├── start.cmd, start.ps1     # Windows: set up .venv and open the launcher
-├── requirements-demo.txt    # demo and launcher
-├── requirements-dev.txt     # tests
-├── requirements.txt         # development set (torch installed separately)
-├── src/
-│   ├── run_live.py          # live body + hand tracking (entry point)
-│   ├── config.py            # model URLs, device config, OpenVINO GPU patch
-│   ├── detector.py, pose_estimator.py, hand_estimator.py   # YOLOX-tiny, RTMPose-m body and hand
-│   ├── motion.py, display.py                               # per-region motion, overlay and charts
-│   ├── face_estimator.py, face_preprocess.py, face_ov/     # optional face landmarks (MediaPipe / OpenVINO)
-│   ├── launcher.py, run_seizure_demo.py, review_video.py   # launcher, live viewer, annotation tool
-│   ├── detector_a/, detector_b/, fusion.py                 # seizure detectors
-│   ├── annotation.py, labels.py                            # ELAN .eaf / JSON annotations, label sets
-│   ├── segment_export.py, segment_store.py, fill_guard.py  # segment export and the fill check
-│   ├── points_export.py                                    # points-only export
-│   ├── deid_*.py                                           # de-identification methods, UI and checks
-│   └── JOINT_MAPPING.md     # VSViG joint mapping comparison
-├── scripts/fetch_models.py  # fetch and verify models and sample data
-├── labels/                  # body.json, face.json label sets
-├── docs/                    # setup, formats, results
-├── third_party/vsvig/       # vendored VSViG code (Apache-2.0)
-├── tests/                   # pytest (see Tests)
-└── README.md
-```
-
-## Tests
-
-```bash
-pip install -r requirements-demo.txt -r requirements-dev.txt
-pytest
-```
-
-`pytest.ini` collects `tests/` only. Tests that need local files are skipped without them:
-- face models: `python scripts/fetch_models.py --face --face-check --skip-data --skip-vsvig`
-- MediaPipe's sample image (five tests): download
-  [business-person.png](https://storage.googleapis.com/mediapipe-assets/business-person.png) to
-  `data/facetest/business-person.png`, or set `FACE_TEST_IMAGE` to its path
-- OpenVINO face parity on a video: set `FACE_OV_CLIP` to a short clip with one face
-
 ## Seizure detection (research)
 
-> **Research use only. Not a medical device and not a diagnostic.** Trained on one hospital's data and
-> **not yet validated across sites.**
+> Trained on one hospital's data and **not yet validated across sites.**
 
-semi-signals also includes a video-only seizure detector built on the semi-signals pose pipeline, plus an explainable
-live viewer and an annotation tool:
+A video-only seizure detector built on the pose pipeline, plus an explainable live viewer and an annotation tool:
 
 - **Detector A**: causal per-second pose features (region speeds, 0.5-1.5 Hz and 1.5-3 Hz rhythm, visibility,
   people in view) and a LightGBM classifier; a segment is flagged when the 5 s mean stays at or above 0.95 for 3 s.
@@ -134,13 +119,11 @@ live viewer and an annotation tool:
   On a second site (MCEC_Seizure, 4 patients, skeletons only) a frozen body-only model caught 2/5 at 11.3/h,
   with chance-level per-second ranking: [docs/mcec_crosssite_results.md](docs/mcec_crosssite_results.md).
 
-![Live viewer: pose overlay, Detector A probability strip with flagged seconds shaded, top drivers and per-region motion](docs/img/live_detector_a.png)
-*Live viewer on the public sample clip `pat10/Sz2P` (source video already pixelated): pose overlay, Detector A probability and drivers.*
+Model weights are not in this repository. Details: [docs/SEIZURE_DETECTION.md](docs/SEIZURE_DETECTION.md),
+[docs/detector_a_results.md](docs/detector_a_results.md),
+[docs/mcec_crosssite_results.md](docs/mcec_crosssite_results.md). Third-party attribution: [NOTICE](NOTICE).
 
-![Annotation tool in face mode with the de-identification dialog: Fill selected, Landmarker MediaPipe or OpenVINO](docs/img/annotation_face_fill.png)
-*Annotation tool, face mode, on a Fill export of an actor clip: the de-identification dialog with the Landmarker picker.*
-
-### Quick start: double-click start.cmd (or run .\start.ps1)
+### Launcher: double-click start.cmd (or run .\start.ps1)
 On Windows, double-click `start.cmd` in the repo folder. It sets up `.venv` on first use (it asks first) and
 opens the launcher window: **Fetch models & sample data**, pick a video, then **Play with live scores** or
 **Annotate this video** (progress, review window and control panel; every change is saved immediately).
@@ -181,22 +164,9 @@ example from the ILAE seizure semiology glossary or a clinical expert), with no 
 `SEMI_SIGNALS_LABELS=<folder>` points to another folder of label files. The timing fields are fixed and
 shared by both modes.
 
-### Points-only segment export
-`python -m src.points_export --npz <extract>.npz --annotations <stem>.annotation.json --out <folder>
---mapping <private.csv> [--mode face] [--drop-iris] [--canonical-face]` writes one file per annotated event
-with keypoints, scores, blendshapes and time relative to the clinical onset: no frames, crops, names, paths
-or dates, random segment ids, and a separate private mapping file. Dense face landmarks may still be
-biometric identifiers, so this reduces re-identification risk; it is not de-identification. Details:
-[docs/FACE_LANDMARKS.md](docs/FACE_LANDMARKS.md#points-only-segment-export).
+## Face de-identification
 
-### Segment export with video (provisional format)
-`python -m src.segment_export --input clip.mp4 --annotations clip.eaf --out <export> --raw-root <local raw folder>
-[--face-preprocess detect]` writes per annotated event a raw clip (under `--raw-root` only), a face-filled
-clip, a landmarks-only clip, landmarks and blendshapes (netCDF, `movement` layout), BIDS-style `events.tsv` /
-`scans.tsv` and a private mapping CSV. Names follow BEP047, a proposal, not part of BIDS. Provisional format:
-[docs/SEGMENT_STORAGE.md](docs/SEGMENT_STORAGE.md).
-
-Face methods ([docs/FACE_DEID_TRADEOFF.md](docs/FACE_DEID_TRADEOFF.md)):
+Methods, measurements and the fill check: [docs/FACE_DEID_TRADEOFF.md](docs/FACE_DEID_TRADEOFF.md). In the tools:
 
 - **Fill** (shareable default): faces painted one flat colour, with a YuNet box fallback for faces the
   landmarker misses. YuNet then checks every output frame, fills any face it finds and checks again, then
@@ -217,9 +187,68 @@ code (Apache-2.0) and four files from the GHOST GitHub releases, sha256-checked,
 (non-commercial research only) and `iresnet.py` (MIT). Without `--accept-ghost-licences` it asks first and
 fetches nothing unless you answer `y`. Donor images are not fetched.
 
-Model weights are not in this repository. Details: [docs/SEIZURE_DETECTION.md](docs/SEIZURE_DETECTION.md),
-[docs/detector_a_results.md](docs/detector_a_results.md),
-[docs/mcec_crosssite_results.md](docs/mcec_crosssite_results.md). Third-party attribution: [NOTICE](NOTICE).
+![Annotation tool in face mode with the de-identification dialog: Fill selected, Landmarker MediaPipe or OpenVINO](docs/img/annotation_face_fill.png)
+*Annotation tool, face mode, on a Fill export of an actor clip: the de-identification dialog with the Landmarker picker.*
+
+## Segment export
+
+### Points-only segment export
+`python -m src.points_export --npz <extract>.npz --annotations <stem>.annotation.json --out <folder>
+--mapping <private.csv> [--mode face] [--drop-iris] [--canonical-face]` writes one file per annotated event
+with keypoints, scores, blendshapes and time relative to the clinical onset: no frames, crops, names, paths
+or dates, random segment ids, and a separate private mapping file. Dense face landmarks may still be
+biometric identifiers, so this reduces re-identification risk; it is not de-identification. Details:
+[docs/FACE_LANDMARKS.md](docs/FACE_LANDMARKS.md#points-only-segment-export).
+
+### Segment export with video (provisional format)
+`python -m src.segment_export --input clip.mp4 --annotations clip.eaf --out <export> --raw-root <local raw folder>
+[--face-preprocess detect]` writes per annotated event a raw clip (under `--raw-root` only), a face-filled
+clip, a landmarks-only clip, landmarks and blendshapes (netCDF, `movement` layout), BIDS-style `events.tsv` /
+`scans.tsv` and a private mapping CSV. Names follow BEP047, a proposal, not part of BIDS. Provisional format:
+[docs/SEGMENT_STORAGE.md](docs/SEGMENT_STORAGE.md).
+
+## Tests
+
+```bash
+pip install -r requirements-demo.txt -r requirements-dev.txt
+pytest
+```
+
+`pytest.ini` collects `tests/` only. Tests that need local files are skipped without them:
+- face models: `python scripts/fetch_models.py --face --face-check --skip-data --skip-vsvig`
+- MediaPipe's sample image (five tests): download
+  [business-person.png](https://storage.googleapis.com/mediapipe-assets/business-person.png) to
+  `data/facetest/business-person.png`, or set `FACE_TEST_IMAGE` to its path
+- OpenVINO face parity on a video: set `FACE_OV_CLIP` to a short clip with one face
+
+## Project layout
+
+```
+semi-signals/
+├── start.cmd, start.ps1     # Windows: set up .venv and open the launcher
+├── requirements-demo.txt    # demo and launcher
+├── requirements-dev.txt     # tests
+├── requirements.txt         # development set (torch installed separately)
+├── src/
+│   ├── run_live.py          # live body + hand tracking (entry point)
+│   ├── config.py            # model URLs, device config, OpenVINO GPU patch
+│   ├── detector.py, pose_estimator.py, hand_estimator.py   # YOLOX-tiny, RTMPose-m body and hand
+│   ├── motion.py, display.py                               # per-region motion, overlay and charts
+│   ├── face_estimator.py, face_preprocess.py, face_ov/     # optional face landmarks (MediaPipe / OpenVINO)
+│   ├── launcher.py, run_seizure_demo.py, review_video.py   # launcher, live viewer, annotation tool
+│   ├── detector_a/, detector_b/, fusion.py                 # seizure detectors
+│   ├── annotation.py, labels.py                            # ELAN .eaf / JSON annotations, label sets
+│   ├── segment_export.py, segment_store.py, fill_guard.py  # segment export and the fill check
+│   ├── points_export.py                                    # points-only export
+│   ├── deid_*.py                                           # de-identification methods, UI and checks
+│   └── JOINT_MAPPING.md     # VSViG joint mapping comparison
+├── scripts/fetch_models.py  # fetch and verify models and sample data
+├── labels/                  # body.json, face.json label sets
+├── docs/                    # setup, formats, results
+├── third_party/vsvig/       # vendored VSViG code (Apache-2.0)
+├── tests/                   # pytest (see Tests)
+└── README.md
+```
 
 ## References
 
@@ -228,8 +257,7 @@ Model weights are not in this repository. Details: [docs/SEIZURE_DETECTION.md](d
 - Ge et al., *"YOLOX: Exceeding YOLO Series in 2021"*. [arXiv:2107.08430](https://arxiv.org/abs/2107.08430)
 - Google, MediaPipe Face Landmarker (BlazeFace, Face Mesh V2, Blendshape V2), Apache-2.0. [ai.google.dev/edge/mediapipe](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker); Kartynnik et al., *"Real-time Facial Surface Geometry from Monocular Video on Mobile GPUs"*, 2019. [arXiv:1907.06724](https://arxiv.org/abs/1907.06724)
 
-**What this project can do today:**
-- Rule-based flags on motion thresholds (e.g., sustained bilateral tremor)
-- L/R asymmetry detection as an indicator
-- Motion time-series recording for offline analysis
-- Clip export on motion spikes for review
+## Licence
+
+MIT © Andrew F Lamkin, see [LICENSE](LICENSE). Third-party code, models and data keep their own licences:
+[NOTICE](NOTICE). The GRID figure in [docs/figures](docs/figures/README.md) is CC BY 4.0, not MIT.
