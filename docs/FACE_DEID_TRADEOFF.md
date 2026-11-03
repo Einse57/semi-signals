@@ -5,6 +5,10 @@ facial landmark data is still there, and how much identity remains? Short answer
 landmarks fully, warp and GHOST keep them partly to well, and the rest keep little. Interpreting the motion is
 for clinical experts. Licences: [FACE_SWAP_LICENCES.md](FACE_SWAP_LICENCES.md).
 
+This comparison was inspired by C.-J. Li et al., "Face swapping in seizure videos for patient deidentification",
+*Epilepsy Research* 207:107453 (2024) ([PubMed 39321717](https://pubmed.ncbi.nlm.nih.gov/39321717/)), which compared
+SimSwap, MobileFaceSwap and GHOST on seizure videos for de-identification and preservation of semiology.
+
 **Landmarks by default come from the raw video.** The usual path runs the tracker on the original frames and
 saves all 478 landmarks and 52 blendshapes next to the clip (`_landmarks.nc`, `_blendshapes.nc`;
 [SEGMENT_STORAGE.md](SEGMENT_STORAGE.md)). How the shared video is de-identified, including `fill`, does not
