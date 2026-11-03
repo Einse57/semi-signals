@@ -1,94 +1,86 @@
-# Face de-identification: motion vs identity
+# Face de-identification: landmarks before and after
 
-How much face motion each method keeps (useful for semiology review) against how much identity it keeps
-(risk). Licences: [FACE_SWAP_LICENCES.md](FACE_SWAP_LICENCES.md).
+For each method: how much of the face the landmarker can still track in the de-identified video, how much face
+motion that keeps, how steady the tracking is, and how much identity remains. Licences:
+[FACE_SWAP_LICENCES.md](FACE_SWAP_LICENCES.md). Interpreting the motion is for clinical experts.
+
+**Where the landmarks come from.** On the shareable `fill` path, all 478 landmarks and 52 blendshapes are
+taken from the raw video before the face is filled and exported next to the filled clip (`_landmarks.nc`,
+`_blendshapes.nc`; [SEGMENT_STORAGE.md](SEGMENT_STORAGE.md)). The filled video itself has no trackable face.
+Warp and the face swaps keep a trackable face in the video, but only part of the original motion. Saved
+landmarks can still carry some identity ([FACE_LANDMARKS.md](FACE_LANDMARKS.md#privacy)).
 
 ## Methods
 
-- `fill`: grown landmark hull painted one flat colour, plus a YuNet box fallback; **the shareable default**.
-- `mosaic8`: about 8 blocks across the face; **reduced risk, not de-identified**.
-- `mosaic16`: about 16 blocks across the face; **not de-identifying**.
-- `gauss`: Gaussian blur, sigma = face width / 6; **local review only**.
-- `warp`: landmark-driven warp of a synthetic donor; **reduced risk, not de-identified**.
-- `ghost` (GHOST face swap): **reduced risk, not de-identified**; research use only, local.
-- `liveportrait`: donor animated by the subject's motion; **reduced risk, not de-identified**; research use only, local.
-
-## Fill fallback and unmasked-face check
-
-The Face Landmarker misses some faces (small, turned away). For each frame, `fill` also paints every YuNet
-detection that no landmark mask covers, as a box padded 20 % per side. After fill, YuNet runs on every output
-frame; if it finds a face (score >= 0.6), the export is marked not shareable and the frame indices are listed
-in the sidecar (`UnmaskedFaceCheck`) and printed. A flagged frame first gets its flagged YuNet boxes filled
-(even inside a landmark hull) and is checked once more; only frames still flagged block sharing. The written
-video is then decoded and checked again with the same settings (`EncodedOutputCheck`). Frames flagged there
-get the flagged boxes filled with a wider margin (30 %, then 50 %), the video is written again and the whole
-file checked again, up to two passes (`EncodedRefill`); a face still found in the final file blocks sharing. Without the YuNet model, fill runs on landmarks only and the
-export can't be marked shareable (`python scripts/fetch_models.py --face-check`).
+`fill`: grown landmark hull painted one flat colour, plus YuNet boxes (the shareable default). `mosaic8` /
+`mosaic16`: about 8 / 16 blocks across the face. `gauss`: Gaussian blur, sigma = face width / 6. `warp`:
+landmark-driven warp of a synthetic donor. `ghost`: GHOST face swap. `liveportrait`: donor animated by the
+subject's motion. GHOST and LivePortrait are research use only, local.
 
 ## Results
 
-hit = share of frames where MediaPipe / YuNet find a face in the output. SFace / ArcFace = share of face
-pairs (original vs output, same place) at or above the same-identity threshold (SFace 0.363; ArcFace
-`glintr100` 0.30 / 0.45); n = pairs. Landmark r = mean Pearson r of five face-region speeds; blendshape r =
-median r over 51 blendshapes (shown when over 50 frames have a face in both). ms/frame = render only, box CPU
-(8 vCPU Xeon VM), landmarks excluded. Donors: mesh = procedural mesh render; SFHQ = one synthetic photo
-(SFHQ part 3, image 00001482; no SFHQ images are in this repository). Clips: GRID s14 (4 clips, 300 frames),
-Intel sample videos (2 clips, 2810 frames).
+Each cell: GRID / Intel. Every face found has the full 478 landmarks. Motion and flicker need over 50 frames
+with a face (otherwise the frame count or "-").
 
-| Method | Donor | Clips (frames) | MediaPipe / YuNet hit | SFace >= 0.363 (n) | ArcFace >= 0.30 / >= 0.45 (n) | Landmark r / blendshape r | ms/frame | Label |
-|---|---|---|---|---|---|---|---|---|
-| fill | - | GRID 4/4 (300) | 0 % / 0 % | no face | no face | (0 frames) | 1.1 | shareable fallback (default) |
-| mosaic, 8 blocks | - | GRID 4/4 (300) | 11 % / 50 % | 0 % (151) | 0 % / 0 % (151) | (38 frames) | 1.1 | reduced risk, not de-identified |
-| mosaic, 16 blocks | - | GRID 4/4 (300) | 100 % / 100 % | 99 % (300) | 100 % / 100 % (300) | 0.25 / 0.32 | 1.1 | not de-identifying |
-| Gaussian blur | - | GRID 4/4 (300) | 1.3 % / 0 % | no face | no face | (4 frames) | 8.1 | local review only |
-| warp | mesh | GRID 4/4 (300) | 100 % / 100 % | 8.7 % (300) | 0 % / 0 % (300) | 0.78 / 0.68 | 11 | reduced risk, not de-identified |
-| warp | SFHQ | GRID 4/4 (300) | 100 % / 100 % | 100 % (300) | 41 % / 0 % (300) | 0.69 / 0.54 | 11 | reduced risk, not de-identified |
-| GHOST | mesh | GRID 4/4 (300) | 100 % / 100 % | 43 % (300) | 0 % / 0 % (300) | 0.78 / 0.68 | 384 | reduced risk, not de-identified; research use only, local |
-| GHOST | SFHQ | GRID 4/4 (300) | 100 % / 100 % | 64 % (300) | 4.0 % / 0 % (300) | 0.82 / 0.74 | 373 | reduced risk, not de-identified; research use only, local |
-| LivePortrait | mesh | GRID 4/4 (300) | 100 % / 100 % | 1.7 % (300) | 0 % / 0 % (300) | 0.14 / 0.02 | 1951 | reduced risk, not de-identified; research use only, local |
-| LivePortrait | SFHQ | GRID 4/4 (300) | 100 % / 100 % | 39 % (300) | 0 % / 0 % (300) | 0.60 / 0.39 | 1887 | reduced risk, not de-identified; research use only, local |
-| fill | - | Intel 2/2 (2810) | 0.2 % / 0.7 % | 79 % (19) | 79 % / 79 % (19) | (19 frames) | 1.1 | shareable fallback (default) |
-| mosaic, 8 blocks | - | Intel 2/2 (2810) | 13 % / 51 % | 5.4 % (1764) | 2.0 % / 0.9 % (1764) | 0.16 / 0.01 | 1.1 | reduced risk, not de-identified |
-| mosaic, 16 blocks | - | Intel 2/2 (2810) | 68 % / 73 % | 89 % (3849) | 92 % / 86 % (3849) | 0.25 / 0.09 | 1.1 | not de-identifying |
-| Gaussian blur | - | Intel 2/2 (2810) | 0.5 % / 4.2 % | 12 % (124) | 11 % / 11 % (124) | (16 frames) | 8.1 | local review only |
-| warp | mesh | Intel 2/2 (2810) | 73 % / 73 % | 5.7 % (3866) | 0.8 % / 0.4 % (3866) | 0.50 / 0.29 | 11 | reduced risk, not de-identified |
-| warp | SFHQ | Intel 2/2 (2810) | 73 % / 73 % | 26 % (3917) | 1.0 % / 0.4 % (3917) | 0.47 / 0.27 | 11 | reduced risk, not de-identified |
-| GHOST | mesh | Intel 2/2 (2810) | 73 % / 73 % | 31 % (3920) | 1.0 % / 0.4 % (3920) | 0.55 / 0.41 | 384 | reduced risk, not de-identified; research use only, local |
-| GHOST | SFHQ | Intel 2/2 (2810) | 73 % / 73 % | 17 % (3928) | 1.2 % / 0.5 % (3928) | 0.53 / 0.44 | 373 | reduced risk, not de-identified; research use only, local |
-| LivePortrait | mesh | Intel 2/2 (2810) | 71 % / 70 % | 2.2 % (3624) | 0.5 % / 0.4 % (3624) | 0.18 / -0.01 | 1951 | reduced risk, not de-identified; research use only, local |
-| LivePortrait | SFHQ | Intel 2/2 (2810) | 68 % / 72 % | 2.3 % (3800) | 0.4 % / 0.4 % (3800) | 0.32 / 0.20 | 1887 | reduced risk, not de-identified; research use only, local |
+| Method | Donor | Face found after | Landmark r, blendshape r | Lost or regained per 100 frames | Flicker (% face width) | Identity kept: SFace, ArcFace | Label |
+|---|---|---|---|---|---|---|---|
+| original | - | 100 % / 73 % | reference | 0 / 0.71 | 0.15 / 0.22 | - | - |
+| fill | - | 0 % / 0.2 % | none in video; 478 + 52 saved from the raw video | 0 / 0.71 | - | no face / 79 %, 79 % (19 pairs, before the fill check) | shareable fallback (default) |
+| mosaic, 8 blocks | - | 11 % / 13 % | (38 frames) / 0.16, 0.01 | 11.7 / 4.9 | - / 0.97 | 0 %, 0 % / 5.4 %, 2.0 % | reduced risk, not de-identified |
+| mosaic, 16 blocks | - | 100 % / 68 % | 0.25, 0.32 / 0.25, 0.09 | 0 / 1.00 | 0.43 / 0.49 | 99 %, 100 % / 89 %, 92 % | not de-identifying |
+| Gaussian blur | - | 1.3 % / 0.5 % | (4 frames) / (16 frames) | 2.7 / 0.78 | - | no face / 12 %, 11 % | local review only |
+| warp | mesh | 100 % / 73 % | 0.78, 0.68 / 0.50, 0.29 | 0 / 0.57 | 0.18 / 0.25 | 8.7 %, 0 % / 5.7 %, 0.8 % | reduced risk, not de-identified |
+| warp | SFHQ | 100 % / 73 % | 0.69, 0.54 / 0.47, 0.27 | 0 / 0.57 | 0.16 / 0.21 | 100 %, 41 % / 26 %, 1.0 % | reduced risk, not de-identified |
+| GHOST | mesh | 100 % / 73 % | 0.78, 0.68 / 0.55, 0.41 | 0 / 0.57 | 0.16 / 0.23 | 43 %, 0 % / 31 %, 1.0 % | reduced risk, not de-identified; research use only, local |
+| GHOST | SFHQ | 100 % / 73 % | 0.82, 0.74 / 0.53, 0.44 | 0 / 0.57 | 0.17 / 0.19 | 64 %, 4.0 % / 17 %, 1.2 % | reduced risk, not de-identified; research use only, local |
+| LivePortrait | mesh | 100 % / 71 % | 0.14, 0.02 / 0.18, -0.01 | 0 / 1.07 | 0.25 / 0.47 | 1.7 %, 0 % / 2.2 %, 0.5 % | reduced risk, not de-identified; research use only, local |
+| LivePortrait | SFHQ | 100 % / 68 % | 0.60, 0.39 / 0.32, 0.20 | 0 / 1.78 | 0.17 / 0.46 | 39 %, 0 % / 2.3 %, 0.4 % | reduced risk, not de-identified; research use only, local |
 
-The Intel `fill` row is before the fallback: YuNet found a face in 19 output frames (5 + 14). With the fallback
-(15 boxes) it finds 4 (0 + 4); the second pass fills those 4 and the recheck finds none, so both Intel clips and
-all 4 GRID clips pass. Fill with fallback and check: 13-15 ms/frame (Intel), 6 ms/frame (GRID), box CPU.
+In short: fill keeps no face in the video and all landmarks in the export. Warp and GHOST keep a face wherever
+the original has one, track it about as steadily as the original and keep most of the region motion on GRID
+and about half on the Intel clips. LivePortrait keeps the face but less of the motion, with more flicker and
+more dropouts on the Intel clips. Mosaic either hides the face from the landmarker (8 blocks) or keeps the
+identity (16 blocks); blur hides it.
 
-### Mosaic and blur per clip
+Landmark r by face region (subject's left / right; GRID / Intel):
 
-A clip is an identity match when it has at least 20 face pairs and at least 50 % are at or above SFace 0.363
-or ArcFace 0.30. `mosaic16` matched on 6 of 6 clips.
+| Method | Donor | Mouth | Eyes L / R | Face side L / R |
+|---|---|---|---|---|
+| mosaic, 16 blocks | - | 0.50 / 0.24 | 0.13, 0.12 / 0.18, 0.19 | 0.23, 0.26 / 0.30, 0.33 |
+| warp | mesh | 0.86 / 0.43 | 0.76, 0.78 / 0.49, 0.53 | 0.75, 0.76 / 0.54, 0.50 |
+| warp | SFHQ | 0.74 / 0.46 | 0.57, 0.65 / 0.41, 0.49 | 0.74, 0.77 / 0.50, 0.50 |
+| GHOST | mesh | 0.86 / 0.51 | 0.73, 0.74 / 0.51, 0.54 | 0.80, 0.79 / 0.60, 0.61 |
+| GHOST | SFHQ | 0.87 / 0.40 | 0.81, 0.75 / 0.52, 0.59 | 0.84, 0.81 / 0.55, 0.56 |
+| LivePortrait | mesh | 0.21 / 0.19 | 0.11, 0.05 / 0.17, 0.16 | 0.17, 0.17 / 0.21, 0.18 |
+| LivePortrait | SFHQ | 0.68 / 0.24 | 0.50, 0.43 / 0.35, 0.38 | 0.71, 0.67 / 0.31, 0.31 |
 
-| Clip | Method | YuNet hit | SFace >= 0.363 (n) | ArcFace >= 0.30 / >= 0.45 (n) | Identity match |
-|---|---|---|---|---|---|
-| Clip | Method | YuNet hit | SFace >= 0.363 (n) | ArcFace >= 0.30 / >= 0.45 (n) | Identity match |
-|---|---|---|---|---|---|
-| GRID lwwy7p | mosaic8 | 47 % | 0 % (35) | 0 % / 0 % (35) | no |
-| GRID lwwy7p | mosaic16 | 100 % | 100 % (75) | 100 % / 99 % (75) | yes |
-| GRID lwwy7p | gauss | 0 % | no face | no face | - |
-| GRID bbad9n | mosaic8 | 65 % | 0 % (49) | 0 % / 0 % (49) | no |
-| GRID bbad9n | mosaic16 | 100 % | 100 % (75) | 100 % / 100 % (75) | yes |
-| GRID bbad9n | gauss | 0 % | no face | no face | - |
-| GRID bbae1p | mosaic8 | 77 % | 0 % (58) | 0 % / 0 % (58) | no |
-| GRID bbae1p | mosaic16 | 100 % | 100 % (75) | 100 % / 100 % (75) | yes |
-| GRID bbae1p | gauss | 0 % | no face | no face | - |
-| GRID bbae2a | mosaic8 | 12 % | 0 % (9) | 0 % / 0 % (9) | too few faces (n < 20) |
-| GRID bbae2a | mosaic16 | 100 % | 96 % (75) | 100 % / 100 % (75) | yes |
-| GRID bbae2a | gauss | 0 % | no face | no face | - |
-| Intel face-demographics-walking-and-pause | mosaic8 | 41 % | 4.6 % (591) | 3.0 % / 1.0 % (591) | no |
-| Intel face-demographics-walking-and-pause | mosaic16 | 43 % | 86 % (775) | 87 % / 73 % (775) | yes |
-| Intel face-demographics-walking-and-pause | gauss | 0.6 % | 71 % (7) | 71 % / 71 % (7) | too few faces (n < 20) |
-| Intel head-pose-face-detection-female-and-male | mosaic8 | 57 % | 5.8 % (1173) | 1.4 % / 0.8 % (1173) | no |
-| Intel head-pose-face-detection-female-and-male | mosaic16 | 92 % | 89 % (3074) | 93 % / 90 % (3074) | yes |
-| Intel head-pose-face-detection-female-and-male | gauss | 6.5 % | 8.5 % (117) | 7.7 % / 7.7 % (117) | no |
+**Fill check.** Fill also paints YuNet faces the landmarker missed (box padded 20 %), then YuNet checks every
+output frame and the written file (score >= 0.6); flagged frames are filled again with wider boxes, and a face
+still found in the final file blocks sharing (sidecar: `UnmaskedFaceCheck`, `EncodedOutputCheck`,
+`EncodedRefill`; details in [SEGMENT_STORAGE.md](SEGMENT_STORAGE.md)). Without the YuNet model the export
+can't be marked shareable (`python scripts/fetch_models.py --face-check`). The Intel fill row is before this
+check: with it, no face was found in any of the 6 clips.
+
+**Mosaic per clip.** A clip is an identity match with at least 20 face pairs and at least 50 % at or above
+SFace 0.363 or ArcFace 0.30. `mosaic16` matched on 6 of 6 clips, `mosaic8` on none (one GRID clip had too few
+faces). Blur left no face on the GRID clips, too few on one Intel clip and no match on the other.
+
+## How measured
+
+- Clips: GRID s14 (4 clips, 300 frames), Intel sample videos (2 clips, 2810 frames). Donors: mesh = procedural
+  mesh render; SFHQ = one synthetic photo (SFHQ part 3, image 00001482; no SFHQ images are in this repository).
+- Face found = share of frames where the MediaPipe Face Landmarker finds a face in the output.
+- Landmark r = mean Pearson r of five face-region speeds (head motion removed, regions as in
+  [FACE_LANDMARKS.md](FACE_LANDMARKS.md)); blendshape r = median r over 51 blendshapes; original vs output,
+  frames with a face in both.
+- Tracking stability (`scripts/face_deid_stability.py`, frame by frame, no smoothing): lost or regained =
+  face appearing or disappearing between frames; longest gap without a face on the Intel clips: original 192
+  frames, warp and GHOST 198, LivePortrait 200-202, mosaic16 202. Flicker = median distance of each landmark
+  from a centred 5-frame average after removing head motion, in % of face width.
+- Identity kept = share of face pairs (original vs output, same place) at or above SFace 0.363 / ArcFace
+  `glintr100` 0.30.
+- Render time per frame, box CPU (8 vCPU Xeon VM), landmarks excluded: fill 1.1 ms (6-15 ms with the fill
+  check), mosaic 1.1 ms, blur 8.1 ms, warp 11 ms, GHOST 373-384 ms, LivePortrait 1887-1951 ms.
 
 ## Figure 1: fill and blur on a GRID frame
 

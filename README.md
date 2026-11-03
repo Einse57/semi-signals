@@ -29,10 +29,10 @@ writes ELAN-compatible labels for new video.
 *Live viewer on the public sample clip `pat10/Sz2P` (source video already pixelated): pose overlay, Detector A probability and drivers.*
 
 ### 3. Face de-identification vs facial landmarks
-Face methods (fill, mosaic, blur, landmark warp, GHOST face swap, LivePortrait) are compared on how much face
-motion they keep (landmark and blendshape correlation with the original) against how much identity they keep
-(face-recognition matches). Fill is the shareable default, and every fill export is checked for remaining
-faces before it can be shared.
+Face methods (fill, mosaic, blur, landmark warp, GHOST face swap, LivePortrait) are compared on how much of the face
+stays trackable, how much face motion they keep (landmark and blendshape correlation with the original) and
+how much identity they keep (face-recognition matches). Fill is the shareable default, and every fill export is
+checked for remaining faces before it can be shared.
 [Face de-identification](#face-de-identification) · [Segment export](#segment-export) · [docs/FACE_DEID_TRADEOFF.md](docs/FACE_DEID_TRADEOFF.md)
 
 ![GRID clip lwwy7p, two frames: face fill (left) and Gaussian blur (right)](docs/figures/face_deid_grid_lwwy7p_fill_blur.png)
